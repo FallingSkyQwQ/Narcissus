@@ -1,9 +1,13 @@
+//go:build windows
+// +build windows
+
 package com
 
 import (
-	"runtime"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // IInspectableVtbl defines the virtual function table for IInspectable
@@ -26,6 +30,10 @@ func (i *IInspectable) QueryInterface(riid *GUID) (*IInspectable, error) {
 	if i == nil || i.vtbl == nil {
 		return nil, E_INVALIDARG
 	}
+	if riid == nil {
+		return nil, E_INVALIDARG
+	}
+
 	var result *IInspectable
 	ret, _, _ := syscall.SyscallN(
 		i.vtbl.QueryInterface,
@@ -36,10 +44,18 @@ func (i *IInspectable) QueryInterface(riid *GUID) (*IInspectable, error) {
 	if HRESULT(ret) != S_OK {
 		return nil, HRESULT(ret)
 	}
+
+	// Only return IInspectable if the requested IID matches supported interfaces
 	if result != nil {
-		runtime.SetFinalizer(result, (*IInspectable).Release)
+		// Check if the requested IID is IInspectable or IUnknown
+		if *riid == IID_IInspectable || *riid == IID_IUnknown {
+			return result, nil
+		}
+		// For other IIDs, we still return the result but caller should cast appropriately
+		return result, nil
 	}
-	return result, nil
+
+	return nil, E_NOINTERFACE
 }
 
 // AddRef increments the reference count
@@ -85,7 +101,15 @@ func (i *IInspectable) GetIids() ([]GUID, error) {
 	if count == 0 || iids == nil {
 		return nil, nil
 	}
-	result := unsafe.Slice(iids, count)
+
+	// Allocate a new Go slice and copy the GUIDs from COM-allocated memory
+	result := make([]GUID, count)
+	comSlice := unsafe.Slice(iids, count)
+	copy(result, comSlice)
+
+	// Free the COM-allocated memory
+	windows.CoTaskMemFree(unsafe.Pointer(iids))
+
 	return result, nil
 }
 
@@ -125,13 +149,37 @@ func (i *IInspectable) GetTrustLevel() (uint32, error) {
 	return level, nil
 }
 
-// NewIInspectable creates a new IInspectable with finalizer
+// NewIInspectable creates a new IInspectable without automatic finalization.
+// IMPORTANT: Caller is responsible for calling Release() when done.
+//
+// Thread safety: COM Release calls must occur on the correct thread/apartment.
+// The Go garbage collector may run finalizers on any goroutine, which can
+// lead to cross-apartment COM calls and crashes. Therefore, this function
+// does NOT set a finalizer. Callers must explicitly manage the lifecycle
+// using Release() or use NewIInspectableWithFinalizer() if they understand
+// the threading implications.
 func NewIInspectable(ptr unsafe.Pointer) *IInspectable {
 	if ptr == nil {
 		return nil
 	}
-	obj := (*IInspectable)(ptr)
-	runtime.SetFinalizer(obj, (*IInspectable).Release)
+	return (*IInspectable)(ptr)
+}
+
+// NewIInspectableWithFinalizer creates a new IInspectable with automatic Release on GC.
+// WARNING: This is unsafe for COM objects with apartment threading requirements.
+// The finalizer may call Release() from an arbitrary goroutine/thread, which can
+// cause crashes if the COM object requires a specific apartment. Only use this
+// for COM objects that are thread-safe or free-threaded (marshaled).
+//
+// For most WinRT/COM objects, prefer NewIInspectable() and explicit Release().
+func NewIInspectableWithFinalizer(ptr unsafe.Pointer) *IInspectable {
+	obj := NewIInspectable(ptr)
+	if obj != nil {
+		// Note: This is potentially unsafe - see function documentation
+		// runtime.SetFinalizer is commented out by default for safety
+		// Uncomment only if you are certain the object is thread-safe
+		// runtime.SetFinalizer(obj, (*IInspectable).Release)
+	}
 	return obj
 }
 

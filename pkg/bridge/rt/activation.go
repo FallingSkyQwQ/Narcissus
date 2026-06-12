@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 package rt
 
 import (
@@ -14,14 +17,19 @@ var (
 // HString represents a Windows Runtime HSTRING handle
 type HString uintptr
 
-// ActivateInstance creates an instance of the specified runtime class
-func ActivateInstance(classID *com.GUID) (*com.IInspectable, error) {
-	// Convert GUID to string format for HSTRING
-	className := guidToString(classID)
+// ActivateInstance creates an instance of the specified WinRT runtime class.
+// className must be a valid WinRT runtime class name (e.g., "Windows.Foundation.Uri"),
+// not a GUID string.
+func ActivateInstance(className string) (*com.IInspectable, error) {
+	// Validate the class name is non-empty
+	if className == "" {
+		return nil, fmt.Errorf("runtime class name cannot be empty")
+	}
 
+	// Create HSTRING from the runtime class name
 	hstr, err := NewHStringFromString(className)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create HSTRING from class name %q: %w", className, err)
 	}
 	defer DeleteHString(hstr)
 
