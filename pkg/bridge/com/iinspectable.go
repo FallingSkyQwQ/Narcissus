@@ -4,6 +4,7 @@
 package com
 
 import (
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -176,9 +177,7 @@ func NewIInspectableWithFinalizer(ptr unsafe.Pointer) *IInspectable {
 	obj := NewIInspectable(ptr)
 	if obj != nil {
 		// Note: This is potentially unsafe - see function documentation
-		// runtime.SetFinalizer is commented out by default for safety
-		// Uncomment only if you are certain the object is thread-safe
-		// runtime.SetFinalizer(obj, (*IInspectable).Release)
+		runtime.SetFinalizer(obj, (*IInspectable).Release)
 	}
 	return obj
 }
