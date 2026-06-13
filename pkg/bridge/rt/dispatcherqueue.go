@@ -2,6 +2,7 @@ package rt
 
 import (
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -13,6 +14,7 @@ var (
 	dispatcherQueueClassName = "Windows.System.DispatcherQueue"
 
 	// IID_IDispatcherQueue for IDispatcherQueue interface
+	// {5FC1548B-0E41-5B91-B7D5-C1D4E9C0C010}
 	IID_IDispatcherQueue = com.NewGUID(
 		0x5FC1548B,
 		0x0E41,
@@ -21,6 +23,7 @@ var (
 	)
 
 	// IID_IDispatcherQueueStatics for static methods
+	// {A8D3D4F0-B273-5CBF-B5E9-FB0DBCE0B000}
 	IID_IDispatcherQueueStatics = com.NewGUID(
 		0xA8D3D4F0,
 		0xB273,
@@ -65,9 +68,8 @@ type DispatcherQueueController struct {
 
 var (
 	// Global dispatcher queue for the main thread
-	globalDispatcherQueue     *DispatcherQueue
-	globalDispatcherQueueMu   sync.RWMutex
-	globalDispatcherQueueOnce sync.Once
+	globalDispatcherQueue   *DispatcherQueue
+	globalDispatcherQueueMu sync.RWMutex
 )
 
 // GetForCurrentThread gets the DispatcherQueue for the current thread
@@ -114,19 +116,19 @@ func (dq *DispatcherQueue) TryEnqueueWithPriority(priority DispatcherQueuePriori
 		return false, com.E_NOTIMPL
 	}
 
-	// Create a delegate to wrap the callback
+	// Create a COM callable wrapper for the callback
 	delegate, err := createDispatcherQueueHandler(callback)
 	if err != nil {
 		return false, err
 	}
-	defer delegate.Release()
+	defer delegate.release()
 
 	var result bool
 	ret, _, _ := syscall.SyscallN(
 		dq.vtable.TryEnqueueWithPriority,
 		uintptr(unsafe.Pointer(dq.inspectable)),
 		uintptr(priority),
-		uintptr(unsafe.Pointer(delegate)),
+		delegate.objectPtr(),
 		uintptr(unsafe.Pointer(&result)),
 	)
 
@@ -209,30 +211,113 @@ func (s *dispatcherQueueStatics) Release() {
 	}
 }
 
-// dispatcherQueueHandler is a callback wrapper
-type dispatcherQueueHandler struct {
-	inspectable *com.IInspectable
-	callback    func()
-}
-
-// IID_IDispatcherQueueHandler for the handler interface
-var IID_IDispatcherQueueHandler = com.NewGUID(
-	0x5C7BAA00,
-	0x0A56,
-	0x5B50,
-	[8]byte{0xB8, 0xA3, 0xE5, 0xE5, 0xF5, 0xE3, 0xE3, 0xE3},
+// Global vtable for dispatcherQueueHandler
+// This is initialized once and shared across all handler instances
+var (
+	dispatcherQueueHandlerVTableInstance *dispatcherQueueHandlerVTable
+	dispatcherQueueHandlerVTableOnce     sync.Once
 )
 
-func createDispatcherQueueHandler(callback func()) (*dispatcherQueueHandler, error) {
-	// For now, return a simple wrapper - in a full implementation,
-	// this would create a COM callable wrapper
-	return &dispatcherQueueHandler{
-		callback: callback,
-	}, nil
+// dispatcherQueueHandlerVTable defines the COM vtable for IDispatcherQueueHandler
+// IDispatcherQueueHandler implements IUnknown + Invoke method
+type dispatcherQueueHandlerVTable struct {
+	QueryInterface uintptr
+	AddRef         uintptr
+	Release        uintptr
+	Invoke         uintptr
 }
 
-func (h *dispatcherQueueHandler) Release() {
-	// Nothing to release for now
+// getDispatcherQueueHandlerVTable returns the singleton vtable for handlers
+func getDispatcherQueueHandlerVTable() *dispatcherQueueHandlerVTable {
+	dispatcherQueueHandlerVTableOnce.Do(func() {
+		vtable := &dispatcherQueueHandlerVTable{}
+		vtable.QueryInterface = syscall.NewCallback(dispatcherQueueHandlerQueryInterface)
+		vtable.AddRef = syscall.NewCallback(dispatcherQueueHandlerAddRef)
+		vtable.Release = syscall.NewCallback(dispatcherQueueHandlerRelease)
+		vtable.Invoke = syscall.NewCallback(dispatcherQueueHandlerInvoke)
+		dispatcherQueueHandlerVTableInstance = vtable
+	})
+	return dispatcherQueueHandlerVTableInstance
+}
+
+// dispatcherQueueHandler represents a COM callable wrapper for Go callbacks
+type dispatcherQueueHandler struct {
+	vtable   *dispatcherQueueHandlerVTable
+	refCount int32
+	callback func()
+}
+
+// createDispatcherQueueHandler creates a new COM callable wrapper for the callback
+func createDispatcherQueueHandler(callback func()) (*dispatcherQueueHandler, error) {
+	handler := &dispatcherQueueHandler{
+		vtable:   getDispatcherQueueHandlerVTable(),
+		refCount: 1,
+		callback: callback,
+	}
+	return handler, nil
+}
+
+// objectPtr returns the pointer to use as IInspectable*
+func (h *dispatcherQueueHandler) objectPtr() uintptr {
+	if h == nil {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(h))
+}
+
+// release decrements the reference count
+func (h *dispatcherQueueHandler) release() {
+	if h == nil {
+		return
+	}
+	if atomic.AddInt32(&h.refCount, -1) == 0 {
+		// Object is being destroyed
+		h.callback = nil
+	}
+}
+
+// COM method implementations for dispatcherQueueHandler
+
+// dispatcherQueueHandlerQueryInterface implements IUnknown::QueryInterface
+func dispatcherQueueHandlerQueryInterface(this uintptr, riid unsafe.Pointer, ppvObject unsafe.Pointer) uintptr {
+	// For now, we only support IUnknown
+	// In a full implementation, we would check riid against IUnknown and IDispatcherQueueHandler
+	if ppvObject == nil {
+		return 0x80070057 // E_INVALIDARG
+	}
+	// Return this pointer as the interface
+	*(*uintptr)(ppvObject) = this
+	// Increment reference count
+	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
+	atomic.AddInt32(&handler.refCount, 1)
+	return 0 // S_OK
+}
+
+// dispatcherQueueHandlerAddRef implements IUnknown::AddRef
+func dispatcherQueueHandlerAddRef(this uintptr) uintptr {
+	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
+	newCount := atomic.AddInt32(&handler.refCount, 1)
+	return uintptr(newCount)
+}
+
+// dispatcherQueueHandlerRelease implements IUnknown::Release
+func dispatcherQueueHandlerRelease(this uintptr) uintptr {
+	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
+	newCount := atomic.AddInt32(&handler.refCount, -1)
+	if newCount == 0 {
+		// Object is being destroyed
+		handler.callback = nil
+	}
+	return uintptr(newCount)
+}
+
+// dispatcherQueueHandlerInvoke implements IDispatcherQueueHandler::Invoke
+func dispatcherQueueHandlerInvoke(this uintptr) uintptr {
+	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
+	if handler.callback != nil {
+		handler.callback()
+	}
+	return 0 // S_OK
 }
 
 // SetGlobalDispatcherQueue sets the global dispatcher queue for the main thread
