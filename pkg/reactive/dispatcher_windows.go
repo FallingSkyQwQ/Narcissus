@@ -20,6 +20,14 @@ type WindowsDispatcher struct {
 	// hasDispatcherQueue indicates whether DispatcherQueue is available
 	// If false, RunOnUI will return an error when not guaranteed to be on UI thread
 	hasDispatcherQueue bool
+	// uiThreadID stores the UI thread ID for thread checking
+	uiThreadID uint32
+}
+
+// getCurrentThreadId returns the current thread ID
+func getCurrentThreadId() uint32 {
+	ret, _, _ := procGetCurrentThreadId.Call()
+	return uint32(ret)
 }
 
 // NewWindowsDispatcher creates a new Windows dispatcher.
@@ -29,6 +37,7 @@ type WindowsDispatcher struct {
 func NewWindowsDispatcher() (*WindowsDispatcher, error) {
 	d := &WindowsDispatcher{
 		hasDispatcherQueue: false,
+		uiThreadID:         getCurrentThreadId(),
 	}
 
 	// Try to get the DispatcherQueue for the current thread
@@ -42,17 +51,22 @@ func NewWindowsDispatcher() (*WindowsDispatcher, error) {
 	return d, nil
 }
 
-// IsUIThread returns false since goroutines are not locked to OS threads.
-// Without runtime.LockOSThread, we cannot guarantee the UI thread.
+// IsUIThread checks if the current thread is the UI thread by comparing thread IDs
 func (d *WindowsDispatcher) IsUIThread() bool {
-	return false
+	return getCurrentThreadId() == d.uiThreadID
 }
 
 // RunOnUI schedules a function to run on the UI thread.
-// Since goroutines are not locked to OS threads, always use DispatcherQueue if available.
-// If DispatcherQueue is available, uses TryEnqueue to schedule.
+// If already on the UI thread, executes the function inline.
+// Otherwise, uses DispatcherQueue to schedule on the UI thread.
 // If DispatcherQueue is not available, returns an error.
 func (d *WindowsDispatcher) RunOnUI(fn func()) error {
+	// If already on UI thread, execute inline to avoid deadlock
+	if d.IsUIThread() {
+		fn()
+		return nil
+	}
+
 	if !d.hasDispatcherQueue || d.dispatcherQueue == nil {
 		return errors.New("cannot schedule to UI thread: DispatcherQueue not available")
 	}

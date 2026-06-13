@@ -160,18 +160,26 @@ func TestDispatcherConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 	numCalls := 100
+	errorsCh := make(chan error, numGoroutines*numCalls)
 
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numCalls; j++ {
-				_ = RunOnUI(func() {})
+				if err := RunOnUI(func() {}); err != nil {
+					errorsCh <- err
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
+	close(errorsCh)
+
+	for err := range errorsCh {
+		t.Errorf("RunOnUI failed: %v", err)
+	}
 
 	expectedCount := numGoroutines * numCalls
 	if mock.getScheduledCount() != expectedCount {
@@ -211,6 +219,7 @@ func TestDispatcherConcurrentSetAndGet(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 10
 	numIterations := 100
+	errorsCh := make(chan error, numGoroutines*numIterations)
 
 	// Concurrent SetDispatcher
 	for i := 0; i < numGoroutines; i++ {
@@ -230,7 +239,9 @@ func TestDispatcherConcurrentSetAndGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numIterations; j++ {
-				_ = RunOnUI(func() {})
+				if err := RunOnUI(func() {}); err != nil {
+					errorsCh <- err
+				}
 			}
 		}()
 	}
@@ -247,4 +258,9 @@ func TestDispatcherConcurrentSetAndGet(t *testing.T) {
 	}
 
 	wg.Wait()
+	close(errorsCh)
+
+	for err := range errorsCh {
+		t.Errorf("RunOnUI failed: %v", err)
+	}
 }
