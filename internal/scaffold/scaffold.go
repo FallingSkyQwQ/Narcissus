@@ -67,7 +67,7 @@ func CreateProject(opts Options) error {
 	}
 
 	// 根据模板类型调用相应的脚手架函数
-	if err := templates.ScaffoldProject(opts.TargetDir, opts.AppName, opts.ModuleName); err != nil {
+	if err := templates.ScaffoldProject(opts.TargetDir, opts.AppName, opts.ModuleName, opts.Template); err != nil {
 		return fmt.Errorf("failed to scaffold project: %w", err)
 	}
 

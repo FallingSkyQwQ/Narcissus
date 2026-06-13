@@ -20,10 +20,23 @@ type TemplateData struct {
 }
 
 // ScaffoldProject 根据模板生成项目脚手架
-func ScaffoldProject(targetDir, appName, moduleName string) error {
+func ScaffoldProject(targetDir, appName, moduleName, templateName string) error {
 	data := TemplateData{
 		AppName:    appName,
 		ModuleName: moduleName,
+	}
+
+	// 选择模板文件系统
+	var templateFS embed.FS
+	var templateRoot string
+	switch templateName {
+	case "basic":
+		templateFS = basicFS
+		templateRoot = "basic"
+	default:
+		// 默认使用 basic 模板
+		templateFS = basicFS
+		templateRoot = "basic"
 	}
 
 	// 确保目标目录存在
@@ -32,7 +45,7 @@ func ScaffoldProject(targetDir, appName, moduleName string) error {
 	}
 
 	// 遍历嵌入的文件系统
-	return fs.WalkDir(basicFS, "basic", func(path string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(templateFS, templateRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -43,7 +56,7 @@ func ScaffoldProject(targetDir, appName, moduleName string) error {
 		}
 
 		// 读取模板文件内容
-		content, err := basicFS.ReadFile(path)
+		content, err := templateFS.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to read template file %s: %w", path, err)
 		}
@@ -55,7 +68,7 @@ func ScaffoldProject(targetDir, appName, moduleName string) error {
 		}
 
 		// 生成目标文件名（去掉 .tmpl 后缀）
-		relPath, err := filepath.Rel("basic", path)
+		relPath, err := filepath.Rel(templateRoot, path)
 		if err != nil {
 			return fmt.Errorf("failed to get relative path: %w", err)
 		}
