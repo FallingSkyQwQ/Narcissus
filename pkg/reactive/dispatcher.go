@@ -26,16 +26,17 @@ func SetDispatcher(d Dispatcher) {
 
 // RunOnUI schedules a function to run on the UI thread.
 // If no dispatcher is set or already on UI thread, the function runs immediately.
-func RunOnUI(fn func()) {
+// Returns an error if the dispatcher cannot schedule the function.
+func RunOnUI(fn func()) error {
 	globalDispatcherMu.RLock()
 	d := globalDispatcher
 	globalDispatcherMu.RUnlock()
 
 	if d == nil || d.IsUIThread() {
 		fn()
-		return
+		return nil
 	}
-	d.RunOnUI(fn)
+	return d.RunOnUI(fn)
 }
 
 // IsUIThread returns true if called from the UI thread.

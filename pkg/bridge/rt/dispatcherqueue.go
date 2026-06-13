@@ -1,3 +1,5 @@
+//go:build windows
+
 package rt
 
 import (
@@ -348,7 +350,27 @@ func dispatcherQueueHandlerRelease(this uintptr) uintptr {
 func dispatcherQueueHandlerInvoke(this uintptr) uintptr {
 	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
 	if handler.callback != nil {
-		handler.callback()
+		// Catch any panic from the callback to prevent it from crossing the COM boundary
+		defer func() {
+			if r := recover(); r != nil {
+				// Panic occurred; already returning E_FAIL below
+			}
+		}()
+
+		// Execute the callback with panic recovery
+		var panicked bool
+		func() {
+			defer func() {
+				if recover() != nil {
+					panicked = true
+				}
+			}()
+			handler.callback()
+		}()
+
+		if panicked {
+			return 0x80004005 // E_FAIL
+		}
 	}
 	return 0 // S_OK
 }

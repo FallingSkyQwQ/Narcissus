@@ -49,9 +49,18 @@ func (e *Effect) Dispose() {
 	}
 }
 
-// SetCleanup sets a cleanup function to be called on Dispose
+// SetCleanup sets a cleanup function to be called on Dispose.
+// If the effect is already disposed, the cleanup is called immediately.
 func (e *Effect) SetCleanup(cleanup func()) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	if e.disposed {
+		// Already disposed, don't store the cleanup but call it immediately
+		e.mu.Unlock()
+		if cleanup != nil {
+			cleanup()
+		}
+		return
+	}
 	e.cleanup = cleanup
+	e.mu.Unlock()
 }

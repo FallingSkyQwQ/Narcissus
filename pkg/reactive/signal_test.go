@@ -3,6 +3,7 @@ package reactive
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSignalBasic(t *testing.T) {
@@ -382,4 +383,96 @@ func TestEffectConcurrent(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestSignalConcurrentSubscribeSet(t *testing.T) {
+	s := NewSignal(0)
+	var wg sync.WaitGroup
+	numSubscribers := 10
+	numSets := 20
+
+	// Track deliveries from each subscriber
+	type delivery struct {
+		subscriberID int
+		value        int
+	}
+	deliveries := make(chan delivery, numSubscribers*numSets*2)
+
+	// Start subscribers
+	for i := 0; i < numSubscribers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			var mu sync.Mutex
+			received := []int{}
+			unsub := s.Subscribe(func(v int) {
+				mu.Lock()
+				received = append(received, v)
+				mu.Unlock()
+				deliveries <- delivery{subscriberID: id, value: v}
+			})
+			defer unsub()
+			// Keep subscriber alive during the test
+			wg.Wait()
+		}(i)
+	}
+
+	// Let subscribers register
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 1; j <= numSets; j++ {
+			s.Set(j)
+		}
+	}()
+
+	wg.Wait()
+	close(deliveries)
+
+	// Verify: for each subscriber, values should be in ascending order
+	// (no newer value delivered before an older initial value)
+	subscriberValues := make(map[int][]int)
+	for d := range deliveries {
+		subscriberValues[d.subscriberID] = append(subscriberValues[d.subscriberID], d.value)
+	}
+
+	for id, values := range subscriberValues {
+		for i := 1; i < len(values); i++ {
+			if values[i] < values[i-1] {
+				t.Errorf("subscriber %d: value %d delivered before %d (out of order)", id, values[i], values[i-1])
+			}
+		}
+	}
+}
+
+func TestComputedReentrancyNoDeadlock(t *testing.T) {
+	s := NewSignal(1)
+	var c *Computed[int]
+
+	// Computed that calls itself via Get (reentrancy)
+	c = NewComputed(func() int {
+		val := s.Get()
+		if val > 0 {
+			// Reentrant call to Get
+			_ = c.Get()
+		}
+		return val * 2
+	})
+
+	// Test Recompute doesn't deadlock with reentrancy
+	done := make(chan bool, 1)
+	go func() {
+		s.Set(2)
+		c.Recompute()
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success, no deadlock
+	case <-time.After(2 * time.Second):
+		t.Fatal("Recompute deadlocked with reentrant Get call")
+	}
+
+	c.Dispose()
 }

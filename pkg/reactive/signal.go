@@ -9,6 +9,7 @@ import (
 type Signal[T any] struct {
 	mu        sync.RWMutex
 	value     T
+	version   uint64
 	observers map[uint64]func(T)
 	nextID    atomic.Uint64
 }
@@ -32,6 +33,7 @@ func (s *Signal[T]) Get() T {
 func (s *Signal[T]) Set(newValue T) {
 	s.mu.Lock()
 	s.value = newValue
+	s.version++
 	observers := make([]func(T), 0, len(s.observers))
 	for _, observer := range s.observers {
 		observers = append(observers, observer)
@@ -44,7 +46,10 @@ func (s *Signal[T]) Set(newValue T) {
 	}
 }
 
-// Subscribe registers an observer and returns an unsubscribe function
+// Subscribe registers an observer and returns an unsubscribe function.
+// The observer is called immediately with the current value, and then on each Set.
+// The initial callback is skipped if a newer Set has already occurred by the time
+// the observer is registered (to prevent out-of-order delivery).
 func (s *Signal[T]) Subscribe(observer func(T)) func() {
 	// Generate unique ID using atomic increment (returns new value, so subtract 1 for 0-based index)
 	id := s.nextID.Add(1) - 1
@@ -52,10 +57,18 @@ func (s *Signal[T]) Subscribe(observer func(T)) func() {
 	s.mu.Lock()
 	s.observers[id] = observer
 	currentValue := s.value
+	currentVersion := s.version
 	s.mu.Unlock()
 
-	// Call observer immediately with current value
-	observer(currentValue)
+	// Call observer immediately with current value only if version hasn't changed
+	// This prevents out-of-order delivery if Set occurs between registration and initial callback
+	s.mu.RLock()
+	stillCurrent := s.version == currentVersion
+	s.mu.RUnlock()
+
+	if stillCurrent {
+		observer(currentValue)
+	}
 
 	return func() {
 		s.mu.Lock()

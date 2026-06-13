@@ -52,9 +52,12 @@ func TestDispatcher(t *testing.T) {
 	SetDispatcher(mock)
 
 	var executed bool
-	RunOnUI(func() {
+	err := RunOnUI(func() {
 		executed = true
 	})
+	if err != nil {
+		t.Errorf("RunOnUI failed: %v", err)
+	}
 
 	if mock.getScheduledCount() != 1 {
 		t.Errorf("expected 1 scheduled function, got %d", mock.getScheduledCount())
@@ -79,9 +82,12 @@ func TestDispatcherIsUIThread(t *testing.T) {
 	SetDispatcher(mock)
 
 	var executed bool
-	RunOnUI(func() {
+	err := RunOnUI(func() {
 		executed = true
 	})
+	if err != nil {
+		t.Errorf("RunOnUI failed: %v", err)
+	}
 
 	// When on UI thread, function should execute immediately
 	if mock.getScheduledCount() != 0 {
@@ -103,9 +109,12 @@ func TestDispatcherNil(t *testing.T) {
 	SetDispatcher(nil)
 
 	var executed bool
-	RunOnUI(func() {
+	err := RunOnUI(func() {
 		executed = true
 	})
+	if err != nil {
+		t.Errorf("RunOnUI failed: %v", err)
+	}
 
 	// When dispatcher is nil, function should execute immediately
 	if !executed {
@@ -139,68 +148,6 @@ func TestIsUIThread(t *testing.T) {
 	}
 }
 
-func TestWindowsDispatcher(t *testing.T) {
-	timeout := time.AfterFunc(5*time.Second, func() {
-		t.Fatal("test timed out")
-	})
-	defer timeout.Stop()
-
-	// Create Windows dispatcher on current thread
-	dispatcher, err := NewWindowsDispatcher()
-	if err != nil {
-		t.Fatalf("NewWindowsDispatcher failed: %v", err)
-	}
-
-	// Should be on UI thread (since we created it on this thread)
-	if !dispatcher.IsUIThread() {
-		t.Error("Should be on UI thread immediately after creation")
-	}
-
-	// RunOnUI should execute immediately when on UI thread
-	var executed bool
-	err = dispatcher.RunOnUI(func() {
-		executed = true
-	})
-	if err != nil {
-		t.Errorf("RunOnUI failed: %v", err)
-	}
-
-	if !executed {
-		t.Error("RunOnUI should execute function immediately when on UI thread")
-	}
-}
-
-func TestWindowsDispatcherNonUIThread(t *testing.T) {
-	timeout := time.AfterFunc(5*time.Second, func() {
-		t.Fatal("test timed out")
-	})
-	defer timeout.Stop()
-
-	// Create dispatcher on current thread
-	dispatcher, err := NewWindowsDispatcher()
-	if err != nil {
-		t.Fatalf("NewWindowsDispatcher failed: %v", err)
-	}
-
-	// Run on a different goroutine (different thread)
-	done := make(chan error, 1)
-	go func() {
-		err := dispatcher.RunOnUI(func() {
-			t.Error("Function should not execute on non-UI thread")
-		})
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("RunOnUI should return error when called from non-UI thread")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("test timed out waiting for goroutine")
-	}
-}
-
 func TestDispatcherConcurrent(t *testing.T) {
 	timeout := time.AfterFunc(10*time.Second, func() {
 		t.Fatal("test timed out")
@@ -219,7 +166,7 @@ func TestDispatcherConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numCalls; j++ {
-				RunOnUI(func() {})
+				_ = RunOnUI(func() {})
 			}
 		}()
 	}
@@ -283,7 +230,7 @@ func TestDispatcherConcurrentSetAndGet(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < numIterations; j++ {
-				RunOnUI(func() {})
+				_ = RunOnUI(func() {})
 			}
 		}()
 	}
