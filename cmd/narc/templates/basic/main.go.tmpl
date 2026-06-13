@@ -1,0 +1,58 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/FallingSkyQwQ/Narcissus/pkg/layout/flex"
+	"github.com/FallingSkyQwQ/Narcissus/pkg/reactive"
+	"github.com/FallingSkyQwQ/Narcissus/pkg/ui"
+)
+
+func main() {
+	count := reactive.NewSignal(0)
+
+	window := ui.NewContainer().
+		Direction(flex.Column).
+		Justify(flex.Center).
+		AlignItems(flex.Center).
+		Padding(ui.UniformInsets(20))
+
+	title := ui.NewText("Welcome to {{.AppName}}!").
+		FontSize(24).
+		TextColor(ui.ColorPrimary)
+
+	counterText := ui.NewText("Count: 0").FontSize(18)
+
+	count.Subscribe(func(c int) {
+		counterText.Text(fmt.Sprintf("Count: %d", c))
+	})
+
+	incrementBtn := ui.NewButton().
+		Text("Increment").
+		OnClick(func() {
+			count.Set(count.Get() + 1)
+		})
+
+	decrementBtn := ui.NewButton().
+		Text("Decrement").
+		BackgroundColor(ui.ColorSecondary).
+		OnClick(func() {
+			count.Set(count.Get() - 1)
+		})
+
+	buttonRow := ui.NewContainer().
+		Direction(flex.Row).
+		Gap(10).
+		Margin(ui.Insets{Top: 20})
+
+	buttonRow.AddChild(incrementBtn)
+	buttonRow.AddChild(decrementBtn)
+
+	window.AddChild(title)
+	window.AddChild(counterText)
+	window.AddChild(buttonRow)
+
+	app := ui.NewApp("{{.AppName}}")
+	app.SetContent(window)
+	app.Run()
+}
