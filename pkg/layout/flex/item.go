@@ -22,6 +22,12 @@ type Item struct {
 	MarginBottom float32
 	MarginLeft   float32
 
+	// Padding
+	PaddingTop    float32
+	PaddingRight  float32
+	PaddingBottom float32
+	PaddingLeft   float32
+
 	// Measured size cache
 	measuredWidth  float32
 	measuredHeight float32
