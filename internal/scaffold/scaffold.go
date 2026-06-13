@@ -67,13 +67,8 @@ func CreateProject(opts Options) error {
 	}
 
 	// 根据模板类型调用相应的脚手架函数
-	switch opts.Template {
-	case "basic":
-		if err := templates.ScaffoldProject(opts.TargetDir, opts.AppName, opts.ModuleName); err != nil {
-			return fmt.Errorf("failed to scaffold project: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported template: %s", opts.Template)
+	if err := templates.ScaffoldProject(opts.TargetDir, opts.AppName, opts.ModuleName); err != nil {
+		return fmt.Errorf("failed to scaffold project: %w", err)
 	}
 
 	fmt.Printf("✓ Created project %q at %s\n", opts.AppName, opts.TargetDir)

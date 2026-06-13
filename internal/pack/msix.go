@@ -35,7 +35,9 @@ func Package(opts Options) error {
 
 	stagingDir := filepath.Join(opts.OutputDir, "msix_staging")
 	os.RemoveAll(stagingDir)
-	os.MkdirAll(stagingDir, 0755)
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return fmt.Errorf("failed to create staging directory: %w", err)
+	}
 	defer os.RemoveAll(stagingDir)
 
 	if opts.ExePath == "" {
@@ -163,10 +165,10 @@ func createZip(sourceDir, outputPath string) error {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
 
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
+			file.Close()
 			return err
 		}
 		header.Name = relPath
@@ -174,10 +176,12 @@ func createZip(sourceDir, outputPath string) error {
 
 		writer, err := zipWriter.CreateHeader(header)
 		if err != nil {
+			file.Close()
 			return err
 		}
 
 		_, err = io.Copy(writer, file)
+		file.Close()
 		return err
 	})
 }

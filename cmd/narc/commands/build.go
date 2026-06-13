@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/FallingSkyQwQ/Narcissus/internal/build"
 	"github.com/spf13/cobra"
@@ -30,13 +31,18 @@ Example:
 		}
 		buildOpts.ProjectDir = projectDir
 
-		mainFile := projectDir + "/main.go"
+		mainFile := filepath.Join(projectDir, "main.go")
 		if _, err := os.Stat(mainFile); os.IsNotExist(err) {
 			return fmt.Errorf("not a Narcissus project: %s/main.go not found", projectDir)
 		}
 
 		if buildOpts.AppName == "" {
 			buildOpts.AppName = build.GetAppName(projectDir)
+		}
+
+		noCompress, _ := cmd.Flags().GetBool("no-compress")
+		if noCompress {
+			buildOpts.Compress = false
 		}
 
 		if err := build.Build(buildOpts); err != nil {

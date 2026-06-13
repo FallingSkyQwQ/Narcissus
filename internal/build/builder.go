@@ -49,7 +49,10 @@ func Build(opts Options) error {
 		return fmt.Errorf("build failed: %w", err)
 	}
 
-	info, _ := os.Stat(outputPath)
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat output file: %w", err)
+	}
 	originalSize := info.Size()
 	fmt.Printf("✓ Build complete: %s (%.2f MB)\n", outputPath, float64(originalSize)/(1024*1024))
 
@@ -58,13 +61,17 @@ func Build(opts Options) error {
 			fmt.Printf("⚠ Compression failed: %v\n", err)
 			fmt.Println("  Output is still usable without compression.")
 		} else {
-			info, _ = os.Stat(outputPath)
-			compressedSize := info.Size()
-			ratio := float64(originalSize-compressedSize) / float64(originalSize) * 100
-			fmt.Printf("✓ Compressed: %.2f MB → %.2f MB (%.1f%% reduction)\n",
-				float64(originalSize)/(1024*1024),
-				float64(compressedSize)/(1024*1024),
-				ratio)
+			info, err := os.Stat(outputPath)
+			if err != nil {
+				fmt.Printf("⚠ Failed to stat compressed file: %v\n", err)
+			} else if originalSize > 0 {
+				compressedSize := info.Size()
+				ratio := float64(originalSize-compressedSize) / float64(originalSize) * 100
+				fmt.Printf("✓ Compressed: %.2f MB → %.2f MB (%.1f%% reduction)\n",
+					float64(originalSize)/(1024*1024),
+					float64(compressedSize)/(1024*1024),
+					ratio)
+			}
 		}
 	}
 

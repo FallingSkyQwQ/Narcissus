@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/FallingSkyQwQ/Narcissus/internal/build"
 	"github.com/FallingSkyQwQ/Narcissus/internal/pack"
@@ -36,17 +37,18 @@ Example:
 		}
 
 		if packageOpts.ExePath == "" {
-			packageOpts.ExePath = packageOpts.OutputDir + "/" + packageOpts.AppName + ".exe"
+			packageOpts.ExePath = filepath.Join(packageOpts.OutputDir, packageOpts.AppName+".exe")
 		}
 
 		if _, err := os.Stat(packageOpts.ExePath); os.IsNotExist(err) {
 			fmt.Printf("Executable not found: %s\n", packageOpts.ExePath)
 			fmt.Println("Building first...")
+			compress, _ := cmd.Flags().GetBool("compress")
 			buildOpts := build.Options{
 				ProjectDir: projectDir,
 				OutputDir:  packageOpts.OutputDir,
 				AppName:    packageOpts.AppName,
-				Compress:   false,
+				Compress:   compress,
 			}
 			if err := build.Build(buildOpts); err != nil {
 				return fmt.Errorf("build failed: %w", err)
@@ -68,5 +70,6 @@ func init() {
 	packageCmd.Flags().StringVar(&packageOpts.Version, "version", "1.0.0.0", "Package version")
 	packageCmd.Flags().StringVar(&packageOpts.Publisher, "publisher", "CN=Developer", "Publisher CN")
 	packageCmd.Flags().StringVar(&packageOpts.ExePath, "exe", "", "Path to executable")
+	packageCmd.Flags().Bool("compress", false, "Use UPX compression when building")
 	rootCmd.AddCommand(packageCmd)
 }
