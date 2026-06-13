@@ -15,6 +15,7 @@ type Widget interface {
 	Layout(x, y, width, height float32)
 	GetRect() flex.Rect
 	GetFlexProperties() flex.FlexProperties
+	GetFlexItem() *flex.Item
 
 	// 样式
 	GetStyle() *Style

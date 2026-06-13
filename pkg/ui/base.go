@@ -91,25 +91,28 @@ func (bw *BaseWidget) GetStyle() *Style {
 
 // SetStyle 设置组件样式
 func (bw *BaseWidget) SetStyle(style *Style) {
+	if style == nil {
+		return
+	}
+
 	bw.mu.Lock()
+	defer bw.mu.Unlock()
+
 	bw.style = style
-	bw.mu.Unlock()
 
 	// 更新 flex 属性
-	if style != nil {
-		bw.flexItem.FlexGrow = style.FlexGrow
-		bw.flexItem.FlexShrink = style.FlexShrink
-		bw.flexItem.FlexBasis = style.FlexBasis
-		bw.flexItem.AlignSelf = style.AlignSelf
-		bw.flexItem.MarginTop = style.Margin.Top
-		bw.flexItem.MarginRight = style.Margin.Right
-		bw.flexItem.MarginBottom = style.Margin.Bottom
-		bw.flexItem.MarginLeft = style.Margin.Left
-		bw.flexItem.PaddingTop = style.Padding.Top
-		bw.flexItem.PaddingRight = style.Padding.Right
-		bw.flexItem.PaddingBottom = style.Padding.Bottom
-		bw.flexItem.PaddingLeft = style.Padding.Left
-	}
+	bw.flexItem.FlexGrow = style.FlexGrow
+	bw.flexItem.FlexShrink = style.FlexShrink
+	bw.flexItem.FlexBasis = style.FlexBasis
+	bw.flexItem.AlignSelf = style.AlignSelf
+	bw.flexItem.MarginTop = style.Margin.Top
+	bw.flexItem.MarginRight = style.Margin.Right
+	bw.flexItem.MarginBottom = style.Margin.Bottom
+	bw.flexItem.MarginLeft = style.Margin.Left
+	bw.flexItem.PaddingTop = style.Padding.Top
+	bw.flexItem.PaddingRight = style.Padding.Right
+	bw.flexItem.PaddingBottom = style.Padding.Bottom
+	bw.flexItem.PaddingLeft = style.Padding.Left
 }
 
 // GetParent 获取父组件
@@ -154,16 +157,20 @@ func (bw *BaseWidget) RemoveChild(child Widget) {
 		return
 	}
 
+	removed := false
 	bw.mu.Lock()
 	for i, c := range bw.children {
 		if c == child {
 			bw.children = append(bw.children[:i], bw.children[i+1:]...)
+			removed = true
 			break
 		}
 	}
 	bw.mu.Unlock()
 
-	child.SetParent(nil)
+	if removed {
+		child.SetParent(nil)
+	}
 }
 
 // HandleEvent 处理事件

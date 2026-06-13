@@ -48,9 +48,15 @@ func NewSlider() *Slider {
 // Min 设置最小值（链式调用）
 func (s *Slider) Min(min float32) *Slider {
 	s.min = min
+	// 确保 min <= max
+	if s.min > s.max {
+		s.max = s.min
+	}
 	// 确保当前值在有效范围内
-	if s.value < min {
-		s.Value(min)
+	if s.value < s.min {
+		s.Value(s.min)
+	} else if s.value > s.max {
+		s.Value(s.max)
 	}
 	return s
 }
@@ -63,9 +69,15 @@ func (s *Slider) GetMin() float32 {
 // Max 设置最大值（链式调用）
 func (s *Slider) Max(max float32) *Slider {
 	s.max = max
+	// 确保 min <= max
+	if s.max < s.min {
+		s.min = s.max
+	}
 	// 确保当前值在有效范围内
-	if s.value > max {
-		s.Value(max)
+	if s.value > s.max {
+		s.Value(s.max)
+	} else if s.value < s.min {
+		s.Value(s.min)
 	}
 	return s
 }
@@ -90,7 +102,7 @@ func (s *Slider) Range(min, max float32) *Slider {
 
 // Value 设置当前值（链式调用）
 func (s *Slider) Value(value float32) *Slider {
-	// 限制在范围内
+	// 先限制在范围内
 	if value < s.min {
 		value = s.min
 	} else if value > s.max {
@@ -101,6 +113,12 @@ func (s *Slider) Value(value float32) *Slider {
 	if s.step > 0 {
 		steps := (value - s.min) / s.step
 		value = s.min + float32(int(steps+0.5))*s.step
+		// 再次限制在范围内，防止舍入误差
+		if value < s.min {
+			value = s.min
+		} else if value > s.max {
+			value = s.max
+		}
 	}
 
 	oldValue := s.value
@@ -189,16 +207,23 @@ func (s *Slider) SetValueByPosition(position float32) {
 		position = 1
 	}
 
-	value := s.min + position*(s.max-s.min)
+	rangeSize := s.max - s.min
+	if rangeSize <= 0 {
+		s.Value(s.min)
+		return
+	}
+
+	value := s.min + position*rangeSize
 	s.Value(value)
 }
 
 // GetValueAsPercentage 获取值的百分比位置（0-1）
 func (s *Slider) GetValueAsPercentage() float32 {
-	if s.max == s.min {
+	rangeSize := s.max - s.min
+	if rangeSize <= 0 {
 		return 0
 	}
-	return (s.value - s.min) / (s.max - s.min)
+	return (s.value - s.min) / rangeSize
 }
 
 // Measure 测量滑块大小

@@ -1,5 +1,7 @@
 package ui
 
+import "fmt"
+
 // Color 表示 RGBA 颜色
 type Color struct {
 	R uint8
@@ -19,7 +21,10 @@ func (c Color) RGBA() (r, g, b, a uint32) {
 
 // Hex 返回颜色的十六进制字符串表示
 func (c Color) Hex() string {
-	return ""
+	if c.A == 255 {
+		return fmt.Sprintf("#%02X%02X%02X", c.R, c.G, c.B)
+	}
+	return fmt.Sprintf("#%02X%02X%02X%02X", c.R, c.G, c.B, c.A)
 }
 
 // WithAlpha 返回具有指定透明度的新颜色

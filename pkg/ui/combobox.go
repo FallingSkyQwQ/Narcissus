@@ -51,9 +51,10 @@ func NewComboBox() *ComboBox {
 
 // Items 设置选项列表（链式调用）
 func (cb *ComboBox) Items(items ...string) *ComboBox {
-	cb.items = items
+	cb.items = make([]string, len(items))
+	copy(cb.items, items)
 	// 如果当前选中索引超出范围，重置为 -1
-	if cb.selectedIndex >= len(items) {
+	if cb.selectedIndex >= len(cb.items) {
 		cb.selectedIndex = -1
 		cb.selectedIndexSignal.Set(-1)
 	}
@@ -62,7 +63,9 @@ func (cb *ComboBox) Items(items ...string) *ComboBox {
 
 // GetItems 获取选项列表
 func (cb *ComboBox) GetItems() []string {
-	return cb.items
+	result := make([]string, len(cb.items))
+	copy(result, cb.items)
+	return result
 }
 
 // SelectedIndex 设置选中索引（链式调用）

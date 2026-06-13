@@ -212,6 +212,72 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// 计算内边距
+	padding := c.style.Padding
+	paddingHorizontal := padding.Left + padding.Right
+	paddingVertical := padding.Top + padding.Bottom
+
+	// 计算内部约束（减去 padding）
+	innerConstraints := constraints
+	if innerConstraints.MaxWidth > 0 {
+		innerConstraints.MaxWidth -= paddingHorizontal
+		if innerConstraints.MaxWidth < 0 {
+			innerConstraints.MaxWidth = 0
+		}
+	}
+	if innerConstraints.MinWidth > 0 {
+		innerConstraints.MinWidth -= paddingHorizontal
+		if innerConstraints.MinWidth < 0 {
+			innerConstraints.MinWidth = 0
+		}
+	}
+	if innerConstraints.MaxHeight > 0 {
+		innerConstraints.MaxHeight -= paddingVertical
+		if innerConstraints.MaxHeight < 0 {
+			innerConstraints.MaxHeight = 0
+		}
+	}
+	if innerConstraints.MinHeight > 0 {
+		innerConstraints.MinHeight -= paddingVertical
+		if innerConstraints.MinHeight < 0 {
+			innerConstraints.MinHeight = 0
+		}
+	}
+
+	// 应用容器样式中的显式尺寸约束
+	if c.style.Width > 0 {
+		innerConstraints.MaxWidth = c.style.Width - paddingHorizontal
+		innerConstraints.MinWidth = c.style.Width - paddingHorizontal
+	}
+	if c.style.Height > 0 {
+		innerConstraints.MaxHeight = c.style.Height - paddingVertical
+		innerConstraints.MinHeight = c.style.Height - paddingVertical
+	}
+	if c.style.MinWidth > 0 {
+		minW := c.style.MinWidth - paddingHorizontal
+		if minW > innerConstraints.MinWidth {
+			innerConstraints.MinWidth = minW
+		}
+	}
+	if c.style.MinHeight > 0 {
+		minH := c.style.MinHeight - paddingVertical
+		if minH > innerConstraints.MinHeight {
+			innerConstraints.MinHeight = minH
+		}
+	}
+	if c.style.MaxWidth > 0 {
+		maxW := c.style.MaxWidth - paddingHorizontal
+		if innerConstraints.MaxWidth == 0 || maxW < innerConstraints.MaxWidth {
+			innerConstraints.MaxWidth = maxW
+		}
+	}
+	if c.style.MaxHeight > 0 {
+		maxH := c.style.MaxHeight - paddingVertical
+		if innerConstraints.MaxHeight == 0 || maxH < innerConstraints.MaxHeight {
+			innerConstraints.MaxHeight = maxH
+		}
+	}
+
 	// 清空 flex 容器的 items
 	c.flexContainer.Items = make([]flex.Item, 0, len(c.children))
 
@@ -221,7 +287,7 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 			continue
 		}
 
-		childSize := child.Measure(constraints)
+		childSize := child.Measure(innerConstraints)
 		childStyle := child.GetStyle()
 		item := flex.Item{
 			Width:         childSize.Width,
@@ -243,9 +309,37 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 	}
 
 	// 测量容器自身
-	size := c.flexContainer.Measure(constraints)
+	innerSize := c.flexContainer.Measure(innerConstraints)
 
-	// 应用约束
+	// 加回 padding
+	size := flex.Size{
+		Width:  innerSize.Width + paddingHorizontal,
+		Height: innerSize.Height + paddingVertical,
+	}
+
+	// 应用容器的显式尺寸
+	if c.style.Width > 0 {
+		size.Width = c.style.Width
+	}
+	if c.style.Height > 0 {
+		size.Height = c.style.Height
+	}
+
+	// 应用容器的 Min/Max 约束
+	if c.style.MinWidth > 0 && size.Width < c.style.MinWidth {
+		size.Width = c.style.MinWidth
+	}
+	if c.style.MaxWidth > 0 && size.Width > c.style.MaxWidth {
+		size.Width = c.style.MaxWidth
+	}
+	if c.style.MinHeight > 0 && size.Height < c.style.MinHeight {
+		size.Height = c.style.MinHeight
+	}
+	if c.style.MaxHeight > 0 && size.Height > c.style.MaxHeight {
+		size.Height = c.style.MaxHeight
+	}
+
+	// 应用外部约束
 	if constraints.MaxWidth > 0 && size.Width > constraints.MaxWidth {
 		size.Width = constraints.MaxWidth
 	}
@@ -306,9 +400,11 @@ func (c *Container) Layout(x, y, width, height float32) {
 		visibleChildren = append(visibleChildren, child)
 
 		style := child.GetStyle()
+		childFlexItem := child.GetFlexItem()
+		measuredWidth, measuredHeight := childFlexItem.GetMeasuredSize()
 		item := flex.Item{
-			Width:         child.GetRect().Size.Width,
-			Height:        child.GetRect().Size.Height,
+			Width:         measuredWidth,
+			Height:        measuredHeight,
 			FlexGrow:      child.GetFlexProperties().FlexGrow,
 			FlexShrink:    child.GetFlexProperties().FlexShrink,
 			FlexBasis:     child.GetFlexProperties().FlexBasis,

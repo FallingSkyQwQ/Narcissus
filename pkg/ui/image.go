@@ -67,6 +67,7 @@ func (img *Image) GetSource() string {
 // Fit 设置图片适应模式（链式调用）
 func (img *Image) Fit(fit ImageFit) *Image {
 	img.fit = fit
+	img.measured = false
 	return img
 }
 
@@ -234,8 +235,19 @@ func (img *Image) Measure(constraints flex.Constraint) flex.Size {
 			width = height // 默认正方形
 		}
 	} else {
-		// 没有设置尺寸，使用原始尺寸或默认尺寸
-		if img.loaded && img.naturalWidth > 0 {
+		// 没有设置尺寸，使用 fit 模式和约束来计算
+		containerWidth := constraints.MaxWidth
+		containerHeight := constraints.MaxHeight
+		if containerWidth == 0 {
+			containerWidth = 100
+		}
+		if containerHeight == 0 {
+			containerHeight = 100
+		}
+
+		if img.fit != ImageFitNone && img.loaded && img.naturalWidth > 0 && img.naturalHeight > 0 {
+			width, height = img.calculateSize(containerWidth, containerHeight)
+		} else if img.loaded && img.naturalWidth > 0 {
 			width = img.naturalWidth
 			height = img.naturalHeight
 		} else {

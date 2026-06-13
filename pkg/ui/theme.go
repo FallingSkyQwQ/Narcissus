@@ -45,7 +45,7 @@ func (t *BaseTheme) GetColor(token ColorToken) Color {
 // GetStyle 获取组件样式
 func (t *BaseTheme) GetStyle(componentType string) *Style {
 	if style, ok := t.Styles[componentType]; ok {
-		return style
+		return style.Clone()
 	}
 	return NewStyle()
 }
@@ -123,6 +123,9 @@ func GetThemeManager() *ThemeManager {
 
 // SetTheme 设置当前主题
 func (tm *ThemeManager) SetTheme(theme Theme) {
+	if theme == nil {
+		theme = NewLightTheme()
+	}
 	tm.mu.Lock()
 	tm.current = theme
 	tm.mu.Unlock()
@@ -147,6 +150,9 @@ func (tm *ThemeManager) Subscribe(observer func(Theme)) func() {
 func (tm *ThemeManager) GetColor(token ColorToken) Color {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
+	if tm.current == nil {
+		return NewLightTheme().GetColor(token)
+	}
 	return tm.current.GetColor(token)
 }
 

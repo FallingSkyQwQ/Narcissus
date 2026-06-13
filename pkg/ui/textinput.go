@@ -72,15 +72,7 @@ func NewTextInput() *TextInput {
 
 // Value 设置值（链式调用）
 func (ti *TextInput) Value(value string) *TextInput {
-	oldValue := ti.value
-	ti.value = value
-	ti.valueSignal.Set(value)
-
-	// 触发变更事件
-	if oldValue != value && ti.onChange != nil {
-		ti.onChange(value)
-	}
-
+	ti.SetText(value)
 	return ti
 }
 
@@ -190,6 +182,10 @@ func (ti *TextInput) Margin(margin Insets) *TextInput {
 // Padding 设置内边距（链式调用）
 func (ti *TextInput) Padding(padding Insets) *TextInput {
 	ti.style.Padding = padding
+	ti.flexItem.PaddingTop = padding.Top
+	ti.flexItem.PaddingRight = padding.Right
+	ti.flexItem.PaddingBottom = padding.Bottom
+	ti.flexItem.PaddingLeft = padding.Left
 	return ti
 }
 
@@ -339,13 +335,17 @@ func (ti *TextInput) HandleEvent(event Event) bool {
 	case EventInput:
 		// 处理输入事件
 		if inputEvent, ok := event.(*InputEvent); ok {
-			ti.SetText(inputEvent.Value)
+			if !ti.IsReadOnly() {
+				ti.SetText(inputEvent.Value)
+			}
 			return true
 		}
 	case EventChange:
 		// 处理变更事件
 		if changeEvent, ok := event.(*ChangeEvent); ok {
-			ti.SetText(changeEvent.Value)
+			if !ti.IsReadOnly() {
+				ti.SetText(changeEvent.Value)
+			}
 			return true
 		}
 	}

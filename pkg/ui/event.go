@@ -185,6 +185,10 @@ func NewEventRegistry() *EventRegistry {
 
 // AddHandler 添加事件处理器，返回取消订阅函数
 func (er *EventRegistry) AddHandler(eventType EventType, handler EventHandler) func() {
+	if handler == nil {
+		return func() {}
+	}
+
 	er.mu.Lock()
 	defer er.mu.Unlock()
 
@@ -213,10 +217,28 @@ func (er *EventRegistry) Dispatch(event Event) bool {
 		return false
 	}
 
-	// 复制处理器列表以避免在遍历期间修改
+	// 收集并排序处理器 ID 以保证顺序
+	ids := make([]uint64, 0, len(handlers))
+	for id := range handlers {
+		ids = append(ids, id)
+	}
+	// 简单插入排序，因为通常处理器数量不多
+	for i := 1; i < len(ids); i++ {
+		key := ids[i]
+		j := i - 1
+		for j >= 0 && ids[j] > key {
+			ids[j+1] = ids[j]
+			j--
+		}
+		ids[j+1] = key
+	}
+
+	// 按排序后的 ID 构建处理器列表
 	handlerList := make([]EventHandler, 0, len(handlers))
-	for _, handler := range handlers {
-		handlerList = append(handlerList, handler)
+	for _, id := range ids {
+		if handler, ok := handlers[id]; ok {
+			handlerList = append(handlerList, handler)
+		}
 	}
 	er.mu.RUnlock()
 
