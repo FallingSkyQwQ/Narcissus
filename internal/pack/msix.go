@@ -2,6 +2,8 @@ package pack
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -96,6 +98,11 @@ func copyFile(src, dst string) error {
 }
 
 func generateManifest(path string, opts Options) error {
+	// Escape XML special characters in user-provided values
+	appName := xmlEscape(opts.AppName)
+	publisher := xmlEscape(opts.Publisher)
+	version := xmlEscape(opts.Version)
+
 	manifest := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
@@ -126,8 +133,15 @@ func generateManifest(path string, opts Options) error {
     <Capability Name="internetClient" />
   </Capabilities>
 </Package>
-`, opts.AppName, opts.Publisher, opts.Version, opts.AppName, opts.Publisher, opts.AppName, opts.AppName)
+`, appName, publisher, version, appName, publisher, appName, appName)
 	return os.WriteFile(path, []byte(manifest), 0644)
+}
+
+// xmlEscape escapes XML special characters
+func xmlEscape(s string) string {
+	var buf bytes.Buffer
+	xml.EscapeText(&buf, []byte(s))
+	return buf.String()
 }
 
 func createMSIX(stagingDir, outputPath string) error {

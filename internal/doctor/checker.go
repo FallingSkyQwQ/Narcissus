@@ -7,6 +7,13 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+var (
+	reGoVersion  = regexp.MustCompile(`go(\d+\.\d+(?:\.\d+)?)`)
+	reGitVersion = regexp.MustCompile(`git version (\d+\.\d+(?:\.\d+)?)`)
 )
 
 type CheckResult struct {
@@ -48,8 +55,8 @@ func RunChecks() []CheckResult {
 }
 
 func checkOS() CheckResult {
-	os := runtime.GOOS
-	switch os {
+	goos := runtime.GOOS
+	switch goos {
 	case "windows":
 		return CheckResult{
 			Name:    "Operating System",
@@ -60,17 +67,26 @@ func checkOS() CheckResult {
 		return CheckResult{
 			Name:    "Operating System",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%s (%s) - Narcissus is designed for Windows", strings.Title(os), runtime.GOARCH),
+			Message: fmt.Sprintf("%s (%s) - Narcissus is designed for Windows", capitalize(goos), runtime.GOARCH),
 			Fix:     "Run on Windows for full compatibility",
 		}
 	default:
 		return CheckResult{
 			Name:    "Operating System",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%s (%s) - unsupported platform", os, runtime.GOARCH),
+			Message: fmt.Sprintf("%s (%s) - unsupported platform", goos, runtime.GOARCH),
 			Fix:     "Use Windows 10/11 for best experience",
 		}
 	}
+}
+
+// capitalize capitalizes the first letter of a string
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
 }
 
 func checkGoVersion() CheckResult {
@@ -87,8 +103,7 @@ func checkGoVersion() CheckResult {
 
 	versionStr := strings.TrimSpace(string(output))
 	// Extract version number from "go version go1.21.0 windows/amd64"
-	re := regexp.MustCompile(`go(\d+\.\d+(?:\.\d+)?)`)
-	matches := re.FindStringSubmatch(versionStr)
+	matches := reGoVersion.FindStringSubmatch(versionStr)
 
 	if len(matches) < 2 {
 		return CheckResult{
@@ -120,8 +135,7 @@ func checkGit() CheckResult {
 
 	versionStr := strings.TrimSpace(string(output))
 	// Extract version from "git version 2.42.0.windows.1"
-	re := regexp.MustCompile(`git version (\d+\.\d+(?:\.\d+)?)`)
-	matches := re.FindStringSubmatch(versionStr)
+	matches := reGitVersion.FindStringSubmatch(versionStr)
 
 	if len(matches) < 2 {
 		return CheckResult{

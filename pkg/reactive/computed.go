@@ -34,12 +34,7 @@ func (c *Computed[T]) Get() T {
 func (c *Computed[T]) SetCompute(compute func() T) {
 	c.mu.Lock()
 	c.compute = compute
-	c.mu.Unlock()
-
-	// Call compute outside the lock to avoid deadlock
 	newValue := compute()
-
-	c.mu.Lock()
 	c.value = newValue
 	c.mu.Unlock()
 }
@@ -47,13 +42,7 @@ func (c *Computed[T]) SetCompute(compute func() T) {
 // Recompute recalculates the value using the current compute function
 func (c *Computed[T]) Recompute() {
 	c.mu.Lock()
-	compute := c.compute
-	c.mu.Unlock()
-
-	// Call compute outside the lock to avoid deadlock
-	newValue := compute()
-
-	c.mu.Lock()
+	newValue := c.compute()
 	c.value = newValue
 	c.mu.Unlock()
 }

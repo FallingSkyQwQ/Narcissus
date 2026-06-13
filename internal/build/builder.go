@@ -23,6 +23,9 @@ func Build(opts Options) error {
 	if opts.AppName == "" {
 		opts.AppName = "app"
 	}
+	if opts.ProjectDir == "" {
+		opts.ProjectDir = "."
+	}
 
 	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)

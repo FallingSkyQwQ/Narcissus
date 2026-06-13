@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/FallingSkyQwQ/Narcissus/pkg/bridge/rt"
 )
@@ -89,8 +90,11 @@ func (d *WindowsDispatcher) RunOnUI(fn func()) error {
 		return errors.New("failed to enqueue callback to dispatcher queue")
 	}
 
-	// Wait for the callback to complete
-	<-done
-
-	return runErr
+	// Wait for the callback to complete with timeout
+	select {
+	case <-done:
+		return runErr
+	case <-time.After(5 * time.Second):
+		return errors.New("UI callback timed out after 5 seconds")
+	}
 }

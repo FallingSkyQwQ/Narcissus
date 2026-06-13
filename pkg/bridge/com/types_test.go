@@ -53,28 +53,14 @@ func TestGUIDToBytes(t *testing.T) {
 	// Data3 (2 bytes, little-endian), Data4 (8 bytes)
 	expected := []byte{
 		0x78, 0x56, 0x34, 0x12, // Data1: 0x12345678 in little-endian
-		0x34, 0x12,             // Data2: 0x1234 in little-endian
-		0x78, 0x56,             // Data3: 0x5678 in little-endian
+		0x34, 0x12, // Data2: 0x1234 in little-endian
+		0x78, 0x56, // Data3: 0x5678 in little-endian
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Data4
 	}
 
 	for i := 0; i < len(expected); i++ {
 		if bytes[i] != expected[i] {
 			t.Errorf("byte %d: expected 0x%02X, got 0x%02X", i, expected[i], bytes[i])
-		}
-	}
-
-	// Also verify using a loop for clarity
-	if len(bytes) == len(expected) {
-		equal := true
-		for i := range bytes {
-			if bytes[i] != expected[i] {
-				equal = false
-				break
-			}
-		}
-		if !equal {
-			t.Errorf("ToBytes() output doesn't match expected byte sequence.\nGot:      %v\nExpected: %v", bytes, expected)
 		}
 	}
 }

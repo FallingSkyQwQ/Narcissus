@@ -1,7 +1,5 @@
 package flex
 
-import "math"
-
 // Line represents a line of flex items in wrapped layout
 type Line struct {
 	Items     []*Item
@@ -53,20 +51,56 @@ func calculateLines(container *Container, availableMain float32) []Line {
 
 // distributeExtraSpace handles flex-grow and flex-shrink
 func distributeExtraSpace(line *Line, availableSpace float32, isMainAxis bool, direction Direction) {
-	if availableSpace <= 0 {
+	if !isMainAxis {
 		return
 	}
 
-	totalFlexGrow := float32(0)
-	for _, item := range line.Items {
-		totalFlexGrow += item.FlexGrow
+	// Handle flex-shrink when available space is negative (overflow)
+	if availableSpace < 0 {
+		totalFlexShrink := float32(0)
+		for _, item := range line.Items {
+			totalFlexShrink += item.FlexShrink
+		}
+
+		if totalFlexShrink > 0 {
+			shrinkPerUnit := availableSpace / totalFlexShrink
+			for _, item := range line.Items {
+				shrink := shrinkPerUnit * item.FlexShrink
+				if direction == DirectionRow || direction == DirectionRowReverse {
+					measuredBase, _ := item.GetMeasuredSize()
+					if item.Width == 0 {
+						item.Width = measuredBase
+					}
+					item.Width = item.Width + shrink
+					if item.Width < 0 {
+						item.Width = 0
+					}
+				} else {
+					_, measuredBase := item.GetMeasuredSize()
+					if item.Height == 0 {
+						item.Height = measuredBase
+					}
+					item.Height = item.Height + shrink
+					if item.Height < 0 {
+						item.Height = 0
+					}
+				}
+			}
+		}
+		return
 	}
 
-	if totalFlexGrow > 0 {
-		spacePerGrow := availableSpace / totalFlexGrow
+	// Handle flex-grow when available space is positive
+	if availableSpace > 0 {
+		totalFlexGrow := float32(0)
 		for _, item := range line.Items {
-			extra := spacePerGrow * item.FlexGrow
-			if isMainAxis {
+			totalFlexGrow += item.FlexGrow
+		}
+
+		if totalFlexGrow > 0 {
+			spacePerGrow := availableSpace / totalFlexGrow
+			for _, item := range line.Items {
+				extra := spacePerGrow * item.FlexGrow
 				if direction == DirectionRow || direction == DirectionRowReverse {
 					measuredBase, _ := item.GetMeasuredSize()
 					if item.Width == 0 {
@@ -155,9 +189,4 @@ func max(a, b float32) float32 {
 		return a
 	}
 	return b
-}
-
-// abs returns the absolute value of a float32
-func abs(a float32) float32 {
-	return float32(math.Abs(float64(a)))
 }

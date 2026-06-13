@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 package com
 
 import (
@@ -19,6 +22,7 @@ type HRESULT int32
 // HRESULT constants - using negative decimal values to avoid overflow
 const (
 	S_OK           HRESULT = 0
+	S_FALSE        HRESULT = 1           // 0x00000001 - operation successful but returned false
 	E_FAIL         HRESULT = -2147467259 // 0x80004005
 	E_INVALIDARG   HRESULT = -2147024809 // 0x80070057
 	E_NOINTERFACE  HRESULT = -2147467262 // 0x80004002

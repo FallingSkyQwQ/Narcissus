@@ -29,10 +29,11 @@ func (e *Effect) run() {
 		e.mu.Unlock()
 		return
 	}
+	fn := e.fn
 	e.mu.Unlock()
 
 	// Execute the effect function
-	e.fn()
+	fn()
 }
 
 // Dispose stops the effect and calls the cleanup function if set

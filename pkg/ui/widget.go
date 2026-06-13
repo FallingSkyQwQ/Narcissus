@@ -43,11 +43,3 @@ type Widget interface {
 	GetEnabled() bool
 	SetEnabled(enabled bool)
 }
-
-// WidgetBase 是 Widget 接口中通用方法的辅助接口
-type WidgetBase interface {
-	// 初始化组件
-	Init()
-	// 销毁组件
-	Dispose()
-}

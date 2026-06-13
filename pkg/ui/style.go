@@ -274,52 +274,39 @@ func (s *Style) WithOpacity(opacity float32) *Style {
 	return s
 }
 
-// Merge 合并另一个样式的属性
+// Merge 合并另一个样式的属性（所有非默认值的属性都会被覆盖）
 func (s *Style) Merge(other *Style) *Style {
 	if other == nil {
 		return s
 	}
 
-	// 只合并非零值
-	if other.Margin != (Insets{}) {
-		s.Margin = other.Margin
-	}
-	if other.Padding != (Insets{}) {
-		s.Padding = other.Padding
-	}
-	if other.FlexGrow != 0 {
-		s.FlexGrow = other.FlexGrow
-	}
-	if other.FlexShrink != 1 {
-		s.FlexShrink = other.FlexShrink
-	}
-	if other.FlexBasis != 0 {
-		s.FlexBasis = other.FlexBasis
-	}
-	if other.AlignSelf != flex.AlignAuto {
-		s.AlignSelf = other.AlignSelf
-	}
-	if other.Width != 0 {
-		s.Width = other.Width
-	}
-	if other.Height != 0 {
-		s.Height = other.Height
-	}
-	if other.BackgroundColor != ColorTransparent {
-		s.BackgroundColor = other.BackgroundColor
-	}
-	if other.TextColor != ColorBlack {
-		s.TextColor = other.TextColor
-	}
-	if other.Border != (Border{}) {
-		s.Border = other.Border
-	}
-	if other.Font != (Font{}) && other.Font != DefaultFont() {
-		s.Font = other.Font
-	}
-	if other.Opacity != 1.0 && other.Opacity != 0 {
-		s.Opacity = other.Opacity
-	}
+	// 直接覆盖所有属性，确保零值也能正确合并
+	s.Margin = other.Margin
+	s.Padding = other.Padding
+	s.FlexGrow = other.FlexGrow
+	s.FlexShrink = other.FlexShrink
+	s.FlexBasis = other.FlexBasis
+	s.AlignSelf = other.AlignSelf
+	s.Width = other.Width
+	s.Height = other.Height
+	s.MinWidth = other.MinWidth
+	s.MinHeight = other.MinHeight
+	s.MaxWidth = other.MaxWidth
+	s.MaxHeight = other.MaxHeight
+	s.BackgroundColor = other.BackgroundColor
+	s.BackgroundImage = other.BackgroundImage
+	s.Border = other.Border
+	s.BorderTop = other.BorderTop
+	s.BorderRight = other.BorderRight
+	s.BorderBottom = other.BorderBottom
+	s.BorderLeft = other.BorderLeft
+	s.Font = other.Font
+	s.TextColor = other.TextColor
+	s.TextAlign = other.TextAlign
+	s.Shadow = other.Shadow
+	s.Opacity = other.Opacity
+	s.Cursor = other.Cursor
+	s.Overflow = other.Overflow
 
 	return s
 }

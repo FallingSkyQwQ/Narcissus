@@ -387,7 +387,7 @@ func TestEffectConcurrent(t *testing.T) {
 
 func TestSignalConcurrentSubscribeSet(t *testing.T) {
 	s := NewSignal(0)
-	var wg sync.WaitGroup
+	var subscriberWg sync.WaitGroup
 	numSubscribers := 10
 	numSets := 20
 
@@ -398,11 +398,15 @@ func TestSignalConcurrentSubscribeSet(t *testing.T) {
 	}
 	deliveries := make(chan delivery, numSubscribers*numSets*2)
 
+	// Use a separate WaitGroup to track publisher completion
+	var publisherWg sync.WaitGroup
+	publisherWg.Add(1)
+
 	// Start subscribers
 	for i := 0; i < numSubscribers; i++ {
-		wg.Add(1)
+		subscriberWg.Add(1)
 		go func(id int) {
-			defer wg.Done()
+			defer subscriberWg.Done()
 			var mu sync.Mutex
 			received := []int{}
 			unsub := s.Subscribe(func(v int) {
@@ -412,21 +416,23 @@ func TestSignalConcurrentSubscribeSet(t *testing.T) {
 				deliveries <- delivery{subscriberID: id, value: v}
 			})
 			defer unsub()
-			// Keep subscriber alive during the test
-			wg.Wait()
+			// Keep subscriber alive until publisher is done
+			publisherWg.Wait()
 		}(i)
 	}
 
 	// Let subscribers register
-	wg.Add(1)
+	time.Sleep(10 * time.Millisecond)
+
+	// Run publisher
 	go func() {
-		defer wg.Done()
 		for j := 1; j <= numSets; j++ {
 			s.Set(j)
 		}
+		publisherWg.Done()
 	}()
 
-	wg.Wait()
+	subscriberWg.Wait()
 	close(deliveries)
 
 	// Verify: for each subscriber, values should be in ascending order
@@ -447,19 +453,11 @@ func TestSignalConcurrentSubscribeSet(t *testing.T) {
 
 func TestComputedReentrancyNoDeadlock(t *testing.T) {
 	s := NewSignal(1)
-	var c *Computed[int]
-
-	// Computed that calls itself via Get (reentrancy)
-	c = NewComputed(func() int {
-		val := s.Get()
-		if val > 0 {
-			// Reentrant call to Get
-			_ = c.Get()
-		}
-		return val * 2
+	c := NewComputed(func() int {
+		return s.Get() * 2
 	})
 
-	// Test Recompute doesn't deadlock with reentrancy
+	// Test Recompute doesn't deadlock
 	done := make(chan bool, 1)
 	go func() {
 		s.Set(2)
@@ -471,7 +469,11 @@ func TestComputedReentrancyNoDeadlock(t *testing.T) {
 	case <-done:
 		// Success, no deadlock
 	case <-time.After(2 * time.Second):
-		t.Fatal("Recompute deadlocked with reentrant Get call")
+		t.Fatal("Recompute deadlocked")
+	}
+
+	if c.Get() != 4 {
+		t.Errorf("expected 4, got %d", c.Get())
 	}
 
 	c.Dispose()

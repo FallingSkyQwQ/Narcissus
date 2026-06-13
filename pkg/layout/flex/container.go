@@ -129,8 +129,26 @@ func (c *Container) Layout(x, y, width, height float32) {
 		justifyOffset := calculateJustifyOffset(c.Justify, availableMainSpace, len(line.Items))
 		justifyGap := calculateJustifyGap(c.Justify, availableMainSpace, len(line.Items))
 
+		// Check if main axis is reversed
+		isMainReverse := c.Direction == DirectionRowReverse || c.Direction == DirectionColumnReverse
+
 		// Position items along main axis
 		mainPos := justifyOffset
+		if isMainReverse {
+			// For reverse direction, start from the end
+			var totalItemsMainSize float32
+			for _, item := range line.Items {
+				var itemMainSize float32
+				if isRow {
+					itemMainSize, _ = item.GetMeasuredSize()
+				} else {
+					_, itemMainSize = item.GetMeasuredSize()
+				}
+				totalItemsMainSize += itemMainSize
+			}
+			mainPos = mainSize - justifyOffset - totalItemsMainSize
+		}
+
 		for _, item := range line.Items {
 			mw, mh := item.GetMeasuredSize()
 
