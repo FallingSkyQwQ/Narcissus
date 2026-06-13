@@ -30,6 +30,15 @@ var (
 		0x5CBF,
 		[8]byte{0xB5, 0xE9, 0xFB, 0x0D, 0xBC, 0xE0, 0xB0, 0x00},
 	)
+
+	// IID_IDispatcherQueueHandler for DispatcherQueueHandler delegate
+	// {D1F276C4-98D8-5D80-95B1-2FB9C5C65A39}
+	IID_IDispatcherQueueHandler = com.NewGUID(
+		0xD1F276C4,
+		0x98D8,
+		0x5D80,
+		[8]byte{0x95, 0xB1, 0x2F, 0xB9, 0xC5, 0xC6, 0x5A, 0x39},
+	)
 )
 
 // DispatcherQueuePriority represents the priority for dispatcher queue callbacks
@@ -280,17 +289,41 @@ func (h *dispatcherQueueHandler) release() {
 
 // dispatcherQueueHandlerQueryInterface implements IUnknown::QueryInterface
 func dispatcherQueueHandlerQueryInterface(this uintptr, riid unsafe.Pointer, ppvObject unsafe.Pointer) uintptr {
-	// For now, we only support IUnknown
-	// In a full implementation, we would check riid against IUnknown and IDispatcherQueueHandler
 	if ppvObject == nil {
 		return 0x80070057 // E_INVALIDARG
 	}
+
+	// Check if riid matches IUnknown or IDispatcherQueueHandler
+	requestedIID := (*com.GUID)(riid)
+	if requestedIID == nil {
+		return 0x80070057 // E_INVALIDARG
+	}
+
+	// Check for IUnknown (IID_IUnknown) or IDispatcherQueueHandler
+	if !isEqualGUID(requestedIID, &com.IID_IUnknown) &&
+		!isEqualGUID(requestedIID, &IID_IDispatcherQueueHandler) {
+		// Unsupported interface
+		*(*uintptr)(ppvObject) = 0
+		return 0x80004002 // E_NOINTERFACE
+	}
+
 	// Return this pointer as the interface
 	*(*uintptr)(ppvObject) = this
 	// Increment reference count
 	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
 	atomic.AddInt32(&handler.refCount, 1)
 	return 0 // S_OK
+}
+
+// isEqualGUID compares two GUIDs for equality
+func isEqualGUID(a, b *com.GUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Data1 == b.Data1 &&
+		a.Data2 == b.Data2 &&
+		a.Data3 == b.Data3 &&
+		a.Data4 == b.Data4
 }
 
 // dispatcherQueueHandlerAddRef implements IUnknown::AddRef
