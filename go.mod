@@ -2,4 +2,4 @@ module github.com/FallingSkyQwQ/Narcissus
 
 go 1.26.4
 
-require golang.org/x/sys v0.46.0 // indirect
+require golang.org/x/sys v0.46.0

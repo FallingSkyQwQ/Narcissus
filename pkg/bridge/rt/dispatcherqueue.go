@@ -3,6 +3,8 @@
 package rt
 
 import (
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -350,25 +352,24 @@ func dispatcherQueueHandlerRelease(this uintptr) uintptr {
 func dispatcherQueueHandlerInvoke(this uintptr) uintptr {
 	handler := (*dispatcherQueueHandler)(unsafe.Pointer(this))
 	if handler.callback != nil {
-		// Catch any panic from the callback to prevent it from crossing the COM boundary
-		defer func() {
-			if r := recover(); r != nil {
-				// Panic occurred; already returning E_FAIL below
-			}
-		}()
-
 		// Execute the callback with panic recovery
 		var panicked bool
+		var panicValue interface{}
+		var panicStack []byte
 		func() {
 			defer func() {
-				if recover() != nil {
+				if r := recover(); r != nil {
 					panicked = true
+					panicValue = r
+					panicStack = debug.Stack()
 				}
 			}()
 			handler.callback()
 		}()
 
 		if panicked {
+			// Log the panic information (this goes to stderr since we can't return it via COM)
+			fmt.Printf("Panic in dispatcher queue handler: %v\nStack trace:\n%s\n", panicValue, panicStack)
 			return 0x80004005 // E_FAIL
 		}
 	}

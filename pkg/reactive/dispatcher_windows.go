@@ -4,6 +4,8 @@ package reactive
 
 import (
 	"errors"
+	"fmt"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/FallingSkyQwQ/Narcissus/pkg/bridge/rt"
@@ -57,16 +59,9 @@ func (d *WindowsDispatcher) IsUIThread() bool {
 }
 
 // RunOnUI schedules a function to run on the UI thread.
-// If already on the UI thread, executes the function inline.
-// Otherwise, uses DispatcherQueue to schedule on the UI thread.
+// Always uses DispatcherQueue to schedule on the UI thread to ensure proper thread affinity.
 // If DispatcherQueue is not available, returns an error.
 func (d *WindowsDispatcher) RunOnUI(fn func()) error {
-	// If already on UI thread, execute inline to avoid deadlock
-	if d.IsUIThread() {
-		fn()
-		return nil
-	}
-
 	if !d.hasDispatcherQueue || d.dispatcherQueue == nil {
 		return errors.New("cannot schedule to UI thread: DispatcherQueue not available")
 	}
@@ -79,7 +74,8 @@ func (d *WindowsDispatcher) RunOnUI(fn func()) error {
 		defer close(done)
 		defer func() {
 			if r := recover(); r != nil {
-				runErr = errors.New("panic in UI callback")
+				stack := debug.Stack()
+				runErr = fmt.Errorf("panic in UI callback: %v\nStack trace:\n%s", r, stack)
 			}
 		}()
 		fn()
