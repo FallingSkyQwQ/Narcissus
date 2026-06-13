@@ -68,9 +68,17 @@ func distributeExtraSpace(line *Line, availableSpace float32, isMainAxis bool, d
 			extra := spacePerGrow * item.FlexGrow
 			if isMainAxis {
 				if direction == DirectionRow || direction == DirectionRowReverse {
-					item.Width += extra
+					measuredBase, _ := item.GetMeasuredSize()
+					if item.Width == 0 {
+						item.Width = measuredBase
+					}
+					item.Width = item.Width + extra
 				} else {
-					item.Height += extra
+					_, measuredBase := item.GetMeasuredSize()
+					if item.Height == 0 {
+						item.Height = measuredBase
+					}
+					item.Height = item.Height + extra
 				}
 			}
 		}
@@ -89,9 +97,15 @@ func calculateJustifyOffset(justify Justify, availableSpace float32, itemCount i
 	case JustifySpaceBetween:
 		return 0
 	case JustifySpaceAround:
+		if itemCount == 0 {
+			return 0.0
+		}
 		gap := availableSpace / float32(itemCount)
 		return gap / 2
 	case JustifySpaceEvenly:
+		if itemCount == 0 {
+			return 0.0
+		}
 		gap := availableSpace / float32(itemCount+1)
 		return gap
 	default:
@@ -127,6 +141,8 @@ func calculateAlignment(align Align, itemSize float32, lineSize float32) float32
 	case AlignCenter:
 		return (lineSize - itemSize) / 2
 	case AlignStretch:
+		return 0
+	case AlignBaseline:
 		return 0
 	default:
 		return 0

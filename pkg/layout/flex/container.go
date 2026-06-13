@@ -83,13 +83,14 @@ func (c *Container) Layout(x, y, width, height float32) {
 	for i := range lines {
 		line := &lines[i]
 		for _, item := range line.Items {
-			_, h := item.GetMeasuredSize()
-			if !isRow {
-				w, _ := item.GetMeasuredSize()
-				h = w
+			var itemCrossSize float32
+			if isRow {
+				_, itemCrossSize = item.GetMeasuredSize()
+			} else {
+				itemCrossSize, _ = item.GetMeasuredSize()
 			}
-			if h > line.CrossSize {
-				line.CrossSize = h
+			if itemCrossSize > line.CrossSize {
+				line.CrossSize = itemCrossSize
 			}
 		}
 		totalCrossSize += line.CrossSize
@@ -111,12 +112,13 @@ func (c *Container) Layout(x, y, width, height float32) {
 		// Calculate total main size of items in this line
 		var totalItemsMainSize float32
 		for _, item := range line.Items {
-			w, _ := item.GetMeasuredSize()
-			if !isRow {
-				_, h := item.GetMeasuredSize()
-				w = h
+			var itemMainSize float32
+			if isRow {
+				itemMainSize, _ = item.GetMeasuredSize()
+			} else {
+				_, itemMainSize = item.GetMeasuredSize()
 			}
-			totalItemsMainSize += w
+			totalItemsMainSize += itemMainSize
 		}
 
 		// Distribute extra space using flex-grow
@@ -176,6 +178,10 @@ func (c *Container) Layout(x, y, width, height float32) {
 			}
 		}
 
-		crossPos += line.CrossSize + c.RowGap
+		if isRow {
+			crossPos += line.CrossSize + c.RowGap
+		} else {
+			crossPos += line.CrossSize + c.ColumnGap
+		}
 	}
 }
