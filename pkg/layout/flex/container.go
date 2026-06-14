@@ -169,7 +169,7 @@ func (c *Container) Layout(x, y, width, height float32) {
 		var itemsToIterate []*Item
 		if isMainReverse {
 			// For reverse direction, start from the end and iterate in reverse
-			mainPos = mainSize - justifyOffset - totalMainOccupied
+			mainPos = mainSize - justifyOffset - totalMainOccupied - (float32(len(line.Items)-1) * justifyGap)
 			// Reverse iteration order
 			itemsToIterate = make([]*Item, len(line.Items))
 			for i, item := range line.Items {

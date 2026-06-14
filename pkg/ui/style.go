@@ -290,7 +290,7 @@ func (s *Style) Merge(other *Style) *Style {
 	if other.FlexGrow != 0 {
 		s.FlexGrow = other.FlexGrow
 	}
-	if other.FlexShrink != 0 {
+	if other.FlexShrink != 1 {
 		s.FlexShrink = other.FlexShrink
 	}
 	if other.FlexBasis != 0 {
@@ -350,7 +350,7 @@ func (s *Style) Merge(other *Style) *Style {
 	if other.Shadow != (Shadow{}) {
 		s.Shadow = other.Shadow
 	}
-	if other.Opacity != 0 {
+	if other.Opacity != 1.0 {
 		// Clamp opacity to [0, 1] range
 		clamped := other.Opacity
 		if clamped < 0 {
