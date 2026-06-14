@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/FallingSkyQwQ/Narcissus/pkg/bridge/rt"
 )
+
+// ErrUICallbackTimedOut is returned when a UI callback does not complete within the timeout period
+var ErrUICallbackTimedOut = errors.New("UI callback timed out (callback may still be running)")
 
 var (
 	kernel32               = syscall.NewLazyDLL("kernel32.dll")
@@ -89,8 +93,11 @@ func (d *WindowsDispatcher) RunOnUI(fn func()) error {
 		return errors.New("failed to enqueue callback to dispatcher queue")
 	}
 
-	// Wait for the callback to complete
-	<-done
-
-	return runErr
+	// Wait for the callback to complete with timeout
+	select {
+	case <-done:
+		return runErr
+	case <-time.After(5 * time.Second):
+		return ErrUICallbackTimedOut
+	}
 }

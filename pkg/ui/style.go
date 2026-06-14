@@ -274,13 +274,13 @@ func (s *Style) WithOpacity(opacity float32) *Style {
 	return s
 }
 
-// Merge 合并另一个样式的属性
+// Merge 合并另一个样式的属性（所有非默认值的属性都会被覆盖）
 func (s *Style) Merge(other *Style) *Style {
 	if other == nil {
 		return s
 	}
 
-	// 只合并非零值
+	// Only copy non-default values
 	if other.Margin != (Insets{}) {
 		s.Margin = other.Margin
 	}
@@ -305,20 +305,66 @@ func (s *Style) Merge(other *Style) *Style {
 	if other.Height != 0 {
 		s.Height = other.Height
 	}
-	if other.BackgroundColor != ColorTransparent {
+	if other.MinWidth != 0 {
+		s.MinWidth = other.MinWidth
+	}
+	if other.MinHeight != 0 {
+		s.MinHeight = other.MinHeight
+	}
+	if other.MaxWidth != 0 {
+		s.MaxWidth = other.MaxWidth
+	}
+	if other.MaxHeight != 0 {
+		s.MaxHeight = other.MaxHeight
+	}
+	if other.BackgroundColor != (Color{}) {
 		s.BackgroundColor = other.BackgroundColor
 	}
-	if other.TextColor != ColorBlack {
-		s.TextColor = other.TextColor
+	if other.BackgroundImage != "" {
+		s.BackgroundImage = other.BackgroundImage
 	}
 	if other.Border != (Border{}) {
 		s.Border = other.Border
 	}
-	if other.Font != (Font{}) && other.Font != DefaultFont() {
+	if other.BorderTop != (Border{}) {
+		s.BorderTop = other.BorderTop
+	}
+	if other.BorderRight != (Border{}) {
+		s.BorderRight = other.BorderRight
+	}
+	if other.BorderBottom != (Border{}) {
+		s.BorderBottom = other.BorderBottom
+	}
+	if other.BorderLeft != (Border{}) {
+		s.BorderLeft = other.BorderLeft
+	}
+	if other.Font != (Font{}) {
 		s.Font = other.Font
 	}
-	if other.Opacity != 1.0 && other.Opacity != 0 {
-		s.Opacity = other.Opacity
+	if other.TextColor != (Color{}) {
+		s.TextColor = other.TextColor
+	}
+	if other.TextAlign != 0 {
+		s.TextAlign = other.TextAlign
+	}
+	if other.Shadow != (Shadow{}) {
+		s.Shadow = other.Shadow
+	}
+	if other.Opacity != 1.0 {
+		// Clamp opacity to [0, 1] range
+		clamped := other.Opacity
+		if clamped < 0 {
+			clamped = 0
+		} else if clamped > 1 {
+			clamped = 1
+		}
+		s.Opacity = clamped
+	}
+	if other.Cursor != "" {
+		s.Cursor = other.Cursor
+	}
+	if other.Overflow != "" {
+		s.Overflow = other.Overflow
 	}
 
 	return s

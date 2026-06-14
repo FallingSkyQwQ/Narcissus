@@ -46,13 +46,7 @@ func (i *IInspectable) QueryInterface(riid *GUID) (*IInspectable, error) {
 		return nil, HRESULT(ret)
 	}
 
-	// Only return IInspectable if the requested IID matches supported interfaces
 	if result != nil {
-		// Check if the requested IID is IInspectable or IUnknown
-		if *riid == IID_IInspectable || *riid == IID_IUnknown {
-			return result, nil
-		}
-		// For other IIDs, we still return the result but caller should cast appropriately
 		return result, nil
 	}
 

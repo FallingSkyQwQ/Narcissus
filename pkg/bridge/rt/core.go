@@ -29,8 +29,8 @@ const (
 // Initialize initializes the Windows Runtime on the current thread
 func Initialize(threadType ThreadType) error {
 	ret, _, _ := procRoInitialize.Call(uintptr(threadType))
-	// S_FALSE (0x00000001) is also ok (already initialized)
-	if com.HRESULT(ret) != com.S_OK && com.HRESULT(ret) != 0x00000001 {
+	// S_FALSE is also ok (already initialized)
+	if com.HRESULT(ret) != com.S_OK && com.HRESULT(ret) != com.S_FALSE {
 		return com.HRESULT(ret)
 	}
 	return nil

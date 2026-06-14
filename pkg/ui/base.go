@@ -280,6 +280,7 @@ func (bw *BaseWidget) Dispose() {
 		return
 	}
 	bw.disposed = true
+	parent := bw.parent
 	bw.mu.Unlock()
 
 	// 清理事件
@@ -298,8 +299,8 @@ func (bw *BaseWidget) Dispose() {
 	}
 
 	// 从父组件中移除
-	if bw.parent != nil {
-		bw.parent.RemoveChild(bw)
+	if parent != nil {
+		parent.RemoveChild(bw)
 	}
 }
 

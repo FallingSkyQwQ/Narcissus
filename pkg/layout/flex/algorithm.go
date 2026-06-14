@@ -1,7 +1,5 @@
 package flex
 
-import "math"
-
 // Line represents a line of flex items in wrapped layout
 type Line struct {
 	Items     []*Item
@@ -53,20 +51,121 @@ func calculateLines(container *Container, availableMain float32) []Line {
 
 // distributeExtraSpace handles flex-grow and flex-shrink
 func distributeExtraSpace(line *Line, availableSpace float32, isMainAxis bool, direction Direction) {
-	if availableSpace <= 0 {
+	if !isMainAxis {
 		return
 	}
 
-	totalFlexGrow := float32(0)
-	for _, item := range line.Items {
-		totalFlexGrow += item.FlexGrow
+	// Handle flex-shrink when available space is negative (overflow)
+	if availableSpace < 0 {
+		// Track which items are frozen (clamped to 0)
+		frozen := make([]bool, len(line.Items))
+		remainingAvailableSpace := availableSpace
+
+		// Iterative redistribution: repeat until space satisfied or all items frozen
+		for remainingAvailableSpace < 0 {
+			// Compute totalFlexShrink only over unfrozen items
+			totalFlexShrink := float32(0)
+			unfrozenCount := 0
+			for i, item := range line.Items {
+				if !frozen[i] {
+					totalFlexShrink += item.FlexShrink
+					unfrozenCount++
+				}
+			}
+
+			// If no unfrozen items or no shrink capacity, stop
+			if unfrozenCount == 0 || totalFlexShrink == 0 {
+				break
+			}
+
+			shrinkPerUnit := remainingAvailableSpace / totalFlexShrink
+			anyItemClamped := false
+
+			for i, item := range line.Items {
+				if frozen[i] {
+					continue
+				}
+
+				shrink := shrinkPerUnit * item.FlexShrink
+				if direction == DirectionRow || direction == DirectionRowReverse {
+					measuredBase, _ := item.GetMeasuredSize()
+					if item.Width == 0 {
+						item.Width = measuredBase
+					}
+					newWidth := item.Width + shrink
+					if newWidth < 0 {
+						// Clamp to 0 and mark as frozen
+						item.Width = 0
+						frozen[i] = true
+						anyItemClamped = true
+					} else {
+						item.Width = newWidth
+					}
+				} else {
+					_, measuredBase := item.GetMeasuredSize()
+					if item.Height == 0 {
+						item.Height = measuredBase
+					}
+					newHeight := item.Height + shrink
+					if newHeight < 0 {
+						// Clamp to 0 and mark as frozen
+						item.Height = 0
+						frozen[i] = true
+						anyItemClamped = true
+					} else {
+						item.Height = newHeight
+					}
+				}
+			}
+
+			// Recompute remaining available space
+			totalItemsSize := float32(0)
+			for _, item := range line.Items {
+				if direction == DirectionRow || direction == DirectionRowReverse {
+					totalItemsSize += item.Width
+				} else {
+					totalItemsSize += item.Height
+				}
+			}
+
+			// Compute new remaining space relative to original availableSpace target
+			// availableSpace is negative, so we need to check if we've distributed enough shrink
+			if direction == DirectionRow || direction == DirectionRowReverse {
+				var totalMeasured float32
+				for _, item := range line.Items {
+					w, _ := item.GetMeasuredSize()
+					totalMeasured += w
+				}
+				remainingAvailableSpace = availableSpace - (totalItemsSize - totalMeasured)
+			} else {
+				var totalMeasured float32
+				for _, item := range line.Items {
+					_, h := item.GetMeasuredSize()
+					totalMeasured += h
+				}
+				remainingAvailableSpace = availableSpace - (totalItemsSize - totalMeasured)
+			}
+
+			// If no items were clamped this iteration and we still have negative space,
+			// we've distributed as much as possible
+			if !anyItemClamped {
+				break
+			}
+		}
+		return
 	}
 
-	if totalFlexGrow > 0 {
-		spacePerGrow := availableSpace / totalFlexGrow
+	// Handle flex-grow when available space is positive
+	if availableSpace > 0 {
+		totalFlexGrow := float32(0)
 		for _, item := range line.Items {
-			extra := spacePerGrow * item.FlexGrow
-			if isMainAxis {
+			totalFlexGrow += item.FlexGrow
+		}
+
+		if totalFlexGrow > 0 {
+			spacePerGrow := availableSpace / totalFlexGrow
+			for _, item := range line.Items {
+				extra := spacePerGrow * item.FlexGrow
 				if direction == DirectionRow || direction == DirectionRowReverse {
 					measuredBase, _ := item.GetMeasuredSize()
 					if item.Width == 0 {
@@ -155,9 +254,4 @@ func max(a, b float32) float32 {
 		return a
 	}
 	return b
-}
-
-// abs returns the absolute value of a float32
-func abs(a float32) float32 {
-	return float32(math.Abs(float64(a)))
 }

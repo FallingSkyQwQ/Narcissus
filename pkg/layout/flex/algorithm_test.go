@@ -140,12 +140,3 @@ func TestMax(t *testing.T) {
 		t.Error("max(20, 10) should be 20")
 	}
 }
-
-func TestAbs(t *testing.T) {
-	if abs(-10) != 10 {
-		t.Error("abs(-10) should be 10")
-	}
-	if abs(10) != 10 {
-		t.Error("abs(10) should be 10")
-	}
-}

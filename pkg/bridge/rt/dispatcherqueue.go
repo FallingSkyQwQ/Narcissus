@@ -112,10 +112,15 @@ func GetForCurrentThread() (*DispatcherQueue, error) {
 		return nil, syscall.EINVAL
 	}
 
-	return &DispatcherQueue{
+	dq := &DispatcherQueue{
 		inspectable: queue,
 		vtable:      (*dispatcherQueueVTable)(unsafe.Pointer(queue.Vtbl())),
-	}, nil
+	}
+
+	// Cache the result for future calls
+	SetGlobalDispatcherQueue(dq)
+
+	return dq, nil
 }
 
 // TryEnqueue schedules a callback on the dispatcher queue
@@ -125,7 +130,7 @@ func (dq *DispatcherQueue) TryEnqueue(callback func()) (bool, error) {
 
 // TryEnqueueWithPriority schedules a callback with specified priority
 func (dq *DispatcherQueue) TryEnqueueWithPriority(priority DispatcherQueuePriority, callback func()) (bool, error) {
-	if dq.vtable == nil || dq.vtable.TryEnqueueWithPriority == 0 {
+	if dq == nil || dq.vtable == nil || dq.inspectable == nil || dq.vtable.TryEnqueueWithPriority == 0 {
 		return false, com.E_NOTIMPL
 	}
 

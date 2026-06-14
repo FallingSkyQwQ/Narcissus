@@ -193,8 +193,10 @@ func TestSetDispatcher(t *testing.T) {
 	})
 	defer timeout.Stop()
 
-	// Save original dispatcher
+	// Save original dispatcher with lock
+	globalDispatcherMu.RLock()
 	original := globalDispatcher
+	globalDispatcherMu.RUnlock()
 	defer SetDispatcher(original)
 
 	// Test setting a new dispatcher

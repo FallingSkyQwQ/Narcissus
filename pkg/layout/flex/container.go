@@ -129,9 +129,58 @@ func (c *Container) Layout(x, y, width, height float32) {
 		justifyOffset := calculateJustifyOffset(c.Justify, availableMainSpace, len(line.Items))
 		justifyGap := calculateJustifyGap(c.Justify, availableMainSpace, len(line.Items))
 
+		// Check if main axis is reversed
+		isMainReverse := c.Direction == DirectionRowReverse || c.Direction == DirectionColumnReverse
+
+		// Compute total main occupied space using post-distribution sizes and gaps
+		var totalMainOccupied float32
+		for idx, item := range line.Items {
+			var itemFinalMainSize float32
+			if isRow {
+				// Use post-distribution width
+				if item.Width != 0 {
+					itemFinalMainSize = item.Width
+				} else {
+					w, _ := item.GetMeasuredSize()
+					itemFinalMainSize = w
+				}
+			} else {
+				// Use post-distribution height
+				if item.Height != 0 {
+					itemFinalMainSize = item.Height
+				} else {
+					_, h := item.GetMeasuredSize()
+					itemFinalMainSize = h
+				}
+			}
+			totalMainOccupied += itemFinalMainSize
+			// Add gap between items (not after the last item)
+			if idx < len(line.Items)-1 {
+				if isRow {
+					totalMainOccupied += c.ColumnGap
+				} else {
+					totalMainOccupied += c.RowGap
+				}
+			}
+		}
+
 		// Position items along main axis
-		mainPos := justifyOffset
-		for _, item := range line.Items {
+		var mainPos float32
+		var itemsToIterate []*Item
+		if isMainReverse {
+			// For reverse direction, start from the end and iterate in reverse
+			mainPos = mainSize - justifyOffset - totalMainOccupied - (float32(len(line.Items)-1) * justifyGap)
+			// Reverse iteration order
+			itemsToIterate = make([]*Item, len(line.Items))
+			for i, item := range line.Items {
+				itemsToIterate[len(line.Items)-1-i] = item
+			}
+		} else {
+			mainPos = justifyOffset
+			itemsToIterate = line.Items
+		}
+
+		for _, item := range itemsToIterate {
 			mw, mh := item.GetMeasuredSize()
 
 			// Use measured size as base, apply flex-grow adjustments

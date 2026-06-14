@@ -278,8 +278,8 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 		}
 	}
 
-	// 清空 flex 容器的 items
-	c.flexContainer.Items = make([]flex.Item, 0, len(c.children))
+	// 复用已有的 items 切片
+	c.flexContainer.Items = c.flexContainer.Items[:0]
 
 	// 测量所有子组件并添加到 flex 容器
 	for _, child := range c.children {
@@ -389,8 +389,8 @@ func (c *Container) Layout(x, y, width, height float32) {
 	c.flexItem.Width = width
 	c.flexItem.Height = height
 
-	// 清空并重新填充 flex 容器的 items
-	c.flexContainer.Items = make([]flex.Item, 0, len(c.children))
+	// 复用已有的 items 切片并重新填充
+	c.flexContainer.Items = c.flexContainer.Items[:0]
 	visibleChildren := make([]Widget, 0, len(c.children))
 
 	for _, child := range c.children {
