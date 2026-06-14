@@ -10,6 +10,7 @@ type Computed[T any] struct {
 	mu      sync.RWMutex
 	value   T
 	compute func() T
+	version uint64
 }
 
 // NewComputed creates a computed signal.
@@ -34,16 +35,37 @@ func (c *Computed[T]) Get() T {
 func (c *Computed[T]) SetCompute(compute func() T) {
 	c.mu.Lock()
 	c.compute = compute
-	newValue := compute()
-	c.value = newValue
+	c.version++
+	localVersion := c.version
+	localCompute := c.compute
+	c.mu.Unlock()
+
+	// Call compute outside the lock
+	newValue := localCompute()
+
+	c.mu.Lock()
+	// Only update if compute function hasn't changed (version still matches)
+	if c.version == localVersion {
+		c.value = newValue
+	}
 	c.mu.Unlock()
 }
 
 // Recompute recalculates the value using the current compute function
 func (c *Computed[T]) Recompute() {
 	c.mu.Lock()
-	newValue := c.compute()
-	c.value = newValue
+	localVersion := c.version
+	localCompute := c.compute
+	c.mu.Unlock()
+
+	// Call compute outside the lock
+	newValue := localCompute()
+
+	c.mu.Lock()
+	// Only update if compute function hasn't changed (version still matches)
+	if c.version == localVersion {
+		c.value = newValue
+	}
 	c.mu.Unlock()
 }
 

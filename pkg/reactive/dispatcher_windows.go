@@ -12,6 +12,9 @@ import (
 	"github.com/FallingSkyQwQ/Narcissus/pkg/bridge/rt"
 )
 
+// ErrUICallbackTimedOut is returned when a UI callback does not complete within the timeout period
+var ErrUICallbackTimedOut = errors.New("UI callback timed out (callback may still be running)")
+
 var (
 	kernel32               = syscall.NewLazyDLL("kernel32.dll")
 	procGetCurrentThreadId = kernel32.NewProc("GetCurrentThreadId")
@@ -95,6 +98,6 @@ func (d *WindowsDispatcher) RunOnUI(fn func()) error {
 	case <-done:
 		return runErr
 	case <-time.After(5 * time.Second):
-		return errors.New("UI callback timed out after 5 seconds")
+		return ErrUICallbackTimedOut
 	}
 }

@@ -280,33 +280,92 @@ func (s *Style) Merge(other *Style) *Style {
 		return s
 	}
 
-	// 直接覆盖所有属性，确保零值也能正确合并
-	s.Margin = other.Margin
-	s.Padding = other.Padding
-	s.FlexGrow = other.FlexGrow
-	s.FlexShrink = other.FlexShrink
-	s.FlexBasis = other.FlexBasis
-	s.AlignSelf = other.AlignSelf
-	s.Width = other.Width
-	s.Height = other.Height
-	s.MinWidth = other.MinWidth
-	s.MinHeight = other.MinHeight
-	s.MaxWidth = other.MaxWidth
-	s.MaxHeight = other.MaxHeight
-	s.BackgroundColor = other.BackgroundColor
-	s.BackgroundImage = other.BackgroundImage
-	s.Border = other.Border
-	s.BorderTop = other.BorderTop
-	s.BorderRight = other.BorderRight
-	s.BorderBottom = other.BorderBottom
-	s.BorderLeft = other.BorderLeft
-	s.Font = other.Font
-	s.TextColor = other.TextColor
-	s.TextAlign = other.TextAlign
-	s.Shadow = other.Shadow
-	s.Opacity = other.Opacity
-	s.Cursor = other.Cursor
-	s.Overflow = other.Overflow
+	// Only copy non-default values
+	if other.Margin != (Insets{}) {
+		s.Margin = other.Margin
+	}
+	if other.Padding != (Insets{}) {
+		s.Padding = other.Padding
+	}
+	if other.FlexGrow != 0 {
+		s.FlexGrow = other.FlexGrow
+	}
+	if other.FlexShrink != 0 {
+		s.FlexShrink = other.FlexShrink
+	}
+	if other.FlexBasis != 0 {
+		s.FlexBasis = other.FlexBasis
+	}
+	if other.AlignSelf != flex.AlignAuto {
+		s.AlignSelf = other.AlignSelf
+	}
+	if other.Width != 0 {
+		s.Width = other.Width
+	}
+	if other.Height != 0 {
+		s.Height = other.Height
+	}
+	if other.MinWidth != 0 {
+		s.MinWidth = other.MinWidth
+	}
+	if other.MinHeight != 0 {
+		s.MinHeight = other.MinHeight
+	}
+	if other.MaxWidth != 0 {
+		s.MaxWidth = other.MaxWidth
+	}
+	if other.MaxHeight != 0 {
+		s.MaxHeight = other.MaxHeight
+	}
+	if other.BackgroundColor != (Color{}) {
+		s.BackgroundColor = other.BackgroundColor
+	}
+	if other.BackgroundImage != "" {
+		s.BackgroundImage = other.BackgroundImage
+	}
+	if other.Border != (Border{}) {
+		s.Border = other.Border
+	}
+	if other.BorderTop != (Border{}) {
+		s.BorderTop = other.BorderTop
+	}
+	if other.BorderRight != (Border{}) {
+		s.BorderRight = other.BorderRight
+	}
+	if other.BorderBottom != (Border{}) {
+		s.BorderBottom = other.BorderBottom
+	}
+	if other.BorderLeft != (Border{}) {
+		s.BorderLeft = other.BorderLeft
+	}
+	if other.Font != (Font{}) {
+		s.Font = other.Font
+	}
+	if other.TextColor != (Color{}) {
+		s.TextColor = other.TextColor
+	}
+	if other.TextAlign != 0 {
+		s.TextAlign = other.TextAlign
+	}
+	if other.Shadow != (Shadow{}) {
+		s.Shadow = other.Shadow
+	}
+	if other.Opacity != 0 {
+		// Clamp opacity to [0, 1] range
+		clamped := other.Opacity
+		if clamped < 0 {
+			clamped = 0
+		} else if clamped > 1 {
+			clamped = 1
+		}
+		s.Opacity = clamped
+	}
+	if other.Cursor != "" {
+		s.Cursor = other.Cursor
+	}
+	if other.Overflow != "" {
+		s.Overflow = other.Overflow
+	}
 
 	return s
 }

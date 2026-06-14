@@ -402,6 +402,10 @@ func TestSignalConcurrentSubscribeSet(t *testing.T) {
 	var publisherWg sync.WaitGroup
 	publisherWg.Add(1)
 
+	// Use a WaitGroup to wait for all subscribers to be ready
+	var readyWg sync.WaitGroup
+	readyWg.Add(numSubscribers)
+
 	// Start subscribers
 	for i := 0; i < numSubscribers; i++ {
 		subscriberWg.Add(1)
@@ -416,13 +420,15 @@ func TestSignalConcurrentSubscribeSet(t *testing.T) {
 				deliveries <- delivery{subscriberID: id, value: v}
 			})
 			defer unsub()
+			// Signal that this subscriber is ready
+			readyWg.Done()
 			// Keep subscriber alive until publisher is done
 			publisherWg.Wait()
 		}(i)
 	}
 
-	// Let subscribers register
-	time.Sleep(10 * time.Millisecond)
+	// Wait for all subscribers to be ready before starting publisher
+	readyWg.Wait()
 
 	// Run publisher
 	go func() {

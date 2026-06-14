@@ -90,11 +90,13 @@ func ScaffoldProject(targetDir, appName, moduleName, templateName string) error 
 		// 执行模板
 		if err := tmpl.Execute(file, data); err != nil {
 			file.Close()
+			os.Remove(targetFilePath) // Clean up partial file, ignore error
 			return fmt.Errorf("failed to execute template %s: %w", path, err)
 		}
 
 		// 立即关闭文件，避免在循环中使用defer导致资源泄漏
 		if err := file.Close(); err != nil {
+			os.Remove(targetFilePath) // Clean up on close failure, ignore error
 			return fmt.Errorf("failed to close file %s: %w", targetFilePath, err)
 		}
 
