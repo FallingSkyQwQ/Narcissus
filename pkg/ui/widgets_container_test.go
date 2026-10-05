@@ -159,3 +159,125 @@ func TestScrollViewSetContentReplaces(t *testing.T) {
 		t.Errorf("children = %d, want 1 after replacing content", len(sv.GetChildren()))
 	}
 }
+
+func TestListDeselectAndClearSelection(t *testing.T) {
+	l := NewList().Items("a", "b", "c").SelectionMode(ListMultipleSelection)
+	l.Select(0)
+	l.Select(1)
+	l.Select(2)
+
+	l.Deselect(1)
+	if l.IsSelected(1) {
+		t.Error("Deselect did not clear the selection")
+	}
+	if got := l.SelectedIndices(); len(got) != 2 || got[0] != 0 || got[1] != 2 {
+		t.Errorf("indices after deselect = %v, want [0 2]", got)
+	}
+
+	l.ClearSelection()
+	if got := l.SelectedIndices(); len(got) != 0 {
+		t.Errorf("indices after clear = %v, want empty", got)
+	}
+	if l.SelectedIndex() != -1 || l.SelectedValue() != "" {
+		t.Errorf("selection after clear = %d/%q, want -1/\"\"", l.SelectedIndex(), l.SelectedValue())
+	}
+}
+
+func TestListSelectIgnoresOutOfRange(t *testing.T) {
+	l := NewList().Items("a")
+	l.Select(-1)
+	l.Select(5)
+	if l.SelectedIndex() != -1 {
+		t.Errorf("selected index = %d, want -1 for out-of-range selects", l.SelectedIndex())
+	}
+}
+
+func TestListSelectedIndicesAreSorted(t *testing.T) {
+	l := NewList().Items("a", "b", "c").SelectionMode(ListMultipleSelection)
+	l.Select(2)
+	l.Select(0)
+
+	if got := l.SelectedIndices(); len(got) != 2 || got[0] != 0 || got[1] != 2 {
+		t.Errorf("selected indices = %v, want ascending [0 2]", got)
+	}
+}
+
+func TestListRenderPropsSelectionMode(t *testing.T) {
+	single := NewList().Items("a")
+	if props := propsOf(single); props.SelectionMode != int(ListSingleSelection) {
+		t.Errorf("single-mode props = %d, want %d", props.SelectionMode, int(ListSingleSelection))
+	}
+
+	multi := NewList().Items("a").SelectionMode(ListMultipleSelection)
+	if props := propsOf(multi); props.SelectionMode != int(ListMultipleSelection) {
+		t.Errorf("multi-mode props = %d, want %d", props.SelectionMode, int(ListMultipleSelection))
+	}
+}
+
+func TestListClickHandledWhenEnabled(t *testing.T) {
+	l := NewList().Items("a")
+	if !l.HandleEvent(newTestClickEvent(l)) {
+		t.Error("click should be handled by an enabled list")
+	}
+
+	l.SetEnabled(false)
+	if l.HandleEvent(newTestClickEvent(l)) {
+		t.Error("disabled list should not handle clicks")
+	}
+}
+
+func TestListItemsReturnsCopy(t *testing.T) {
+	l := NewList().Items("a", "b")
+	items := l.GetItems()
+	items[0] = "mutated"
+	if l.GetItems()[0] != "a" {
+		t.Error("GetItems did not return a copy")
+	}
+}
+
+func TestScrollViewMeasureDefaults(t *testing.T) {
+	size := NewScrollView().Measure(flex.Constraint{})
+	if size.Width != 200 || size.Height != 150 {
+		t.Errorf("default size = %gx%g, want 200x150", size.Width, size.Height)
+	}
+
+	sized := NewScrollView().Size(120, 60)
+	size = sized.Measure(flex.Constraint{})
+	if size.Width != 120 || size.Height != 60 {
+		t.Errorf("explicit size = %gx%g, want 120x60", size.Width, size.Height)
+	}
+}
+
+func TestScrollViewLayoutGivesContentNaturalHeight(t *testing.T) {
+	SetTextMeasurer(fixedMeasurer{perRune: 10, height: 7})
+	defer SetTextMeasurer(nil)
+
+	content := NewText("scroll me")                         // 9 runes * 10 = 90 wide, 7 tall
+	sv := NewScrollView().SetContent(content).Size(200, 30) // viewport shorter than content
+	sv.Layout(5, 10, 200, 30)
+
+	rect := content.GetRect()
+	if rect.Position.X != 5 || rect.Position.Y != 10 {
+		t.Errorf("content position = %v, want (5, 10)", rect.Position)
+	}
+	if rect.Size.Width != 200 {
+		t.Errorf("content width = %g, want 200", rect.Size.Width)
+	}
+	// The content keeps its natural height; the overflow is
+	// handled by the native scrollbars.
+	if rect.Size.Height != 7 {
+		t.Errorf("content height = %g, want natural 7", rect.Size.Height)
+	}
+}
+
+func TestScrollViewSetContentNilClears(t *testing.T) {
+	sv := NewScrollView().SetContent(NewText("x"))
+	sv.SetContent(nil)
+
+	if sv.Content() != nil {
+		t.Error("content should be nil after SetContent(nil)")
+	}
+	if len(sv.GetChildren()) != 0 {
+		t.Errorf("children = %d, want 0 after clearing content", len(sv.GetChildren()))
+	}
+}

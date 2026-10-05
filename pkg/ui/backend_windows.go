@@ -44,11 +44,17 @@ func newPlatformBackend() Backend {
 	return &winBackend{}
 }
 
+// winBackend can present dialogs and toasts.
+var _ Presenter = (*winBackend)(nil)
+
 type winBackend struct {
 	mu         sync.Mutex
 	uiThreadID uint64
 	pending    []*winWindow
 	dispatcher *uidispatching.IDispatcherQueue
+	// active is the most recently built window, used as the owner for
+	// dialogs and toasts.
+	active *winWindow
 }
 
 func (b *winBackend) Name() string { return "winui3" }
@@ -204,6 +210,9 @@ func (w *winWindow) Close() {
 // native control, mounts the widget tree and activates the window.
 func (w *winWindow) build(ready *app.Ready) error {
 	w.window = ready.Window
+	w.backend.mu.Lock()
+	w.backend.active = w
+	w.backend.mu.Unlock()
 	if err := ready.Window.SetTitle(w.title); err != nil {
 		return fmt.Errorf("winui3: set title: %w", err)
 	}
@@ -248,6 +257,141 @@ func (w *winWindow) relayout() {
 	}
 }
 
+// PresentDialog shows a modal ContentDialog owned by the active window. It
+// satisfies the Presenter capability.
+//
+// The dialog result is delivered asynchronously through the WinRT completion
+// handler, which marshals onto the UI thread; the buttons map Primary,
+// Secondary then Close to indices 0, 1 and 2.
+func (b *winBackend) PresentDialog(spec DialogSpec) error {
+	b.mu.Lock()
+	window := b.active
+	b.mu.Unlock()
+	if window == nil || window.window == nil {
+		return errors.New("winui3: no window for dialog")
+	}
+
+	dialog, err := uixaml.NewContentDialog()
+	if err != nil {
+		return fmt.Errorf("winui3: create ContentDialog: %w", err)
+	}
+	api, err := dialog.AsContentDialog()
+	if err != nil {
+		return fmt.Errorf("winui3: query IContentDialog: %w", err)
+	}
+
+	if err := app.With(dialog.AsContentControl, func(content *uixaml.IContentControl) error {
+		return app.SetContent(func() (*uixaml.IContentControl, error) { return content, nil }, spec.Message)
+	}); err != nil {
+		return fmt.Errorf("winui3: set dialog content: %w", err)
+	}
+
+	if title, titleErr := app.Box(spec.Title); titleErr == nil {
+		_ = api.SetTitle(title)
+		title.Release()
+	}
+	buttons := spec.Buttons
+	if len(buttons) == 0 {
+		buttons = []string{"OK"}
+	}
+	for i, label := range buttons {
+		switch i {
+		case 0:
+			_ = api.SetPrimaryButtonText(label)
+		case 1:
+			_ = api.SetSecondaryButtonText(label)
+		case 2:
+			_ = api.SetCloseButtonText(label)
+		}
+	}
+
+	// The dialog needs the XamlRoot of the window content to show. The dialog
+	// itself is a UIElement, so its own SetXamlRoot is used.
+	if window.root != nil && window.root.asUIElement != nil {
+		if root, rootErr := withValue(window.root.asUIElement, func(element *uixaml.IUIElement) (*uixaml.IXamlRoot, error) {
+			return element.XamlRoot()
+		}); rootErr == nil && root != nil {
+			_ = app.With(dialog.AsUIElement, func(element *uixaml.IUIElement) error {
+				return element.SetXamlRoot(root)
+			})
+			root.Release()
+		}
+	}
+
+	operation, err := api.ShowAsync()
+	if err != nil {
+		return fmt.Errorf("winui3: show ContentDialog: %w", err)
+	}
+
+	onResult := spec.OnResult
+	handler, err := uixaml.NewAsyncOperationCompletedHandlerOfContentDialogResult(
+		func(asyncInfo *uixaml.IAsyncOperationOfContentDialogResult, status wrtfoundation.AsyncStatus) {
+			if onResult == nil {
+				return
+			}
+			result, resultErr := asyncInfo.GetResults()
+			if resultErr != nil {
+				return
+			}
+			index := 0
+			switch result {
+			case uixaml.ContentDialogResultSecondary:
+				index = 1
+			case uixaml.ContentDialogResultNone:
+				index = 2
+			}
+			onResult(index)
+		})
+	if err != nil {
+		return fmt.Errorf("winui3: dialog completion handler: %w", err)
+	}
+	if err := operation.SetCompleted(handler); err != nil {
+		return fmt.Errorf("winui3: arm dialog completion: %w", err)
+	}
+	return nil
+}
+
+// PresentToast shows a transient InfoBar at the top of the active window.
+func (b *winBackend) PresentToast(spec ToastSpec) error {
+	b.mu.Lock()
+	window := b.active
+	b.mu.Unlock()
+	if window == nil || window.root == nil || window.root.asPanel == nil {
+		return errors.New("winui3: no window for toast")
+	}
+
+	bar, err := uixaml.NewInfoBar()
+	if err != nil {
+		return fmt.Errorf("winui3: create InfoBar: %w", err)
+	}
+	api, err := bar.AsInfoBar()
+	if err != nil {
+		return fmt.Errorf("winui3: query IInfoBar: %w", err)
+	}
+	_ = api.SetMessage(spec.Message)
+	_ = api.SetSeverity(infoBarSeverity(spec.Severity))
+	_ = api.SetIsClosable(true)
+
+	if err := app.Append(window.root.asPanel, bar.AsUIElement); err != nil {
+		return fmt.Errorf("winui3: append InfoBar: %w", err)
+	}
+	_ = api.SetIsOpen(true)
+	return nil
+}
+
+func infoBarSeverity(severity ToastSeverity) uixaml.InfoBarSeverity {
+	switch severity {
+	case ToastSuccess:
+		return uixaml.InfoBarSeveritySuccess
+	case ToastWarning:
+		return uixaml.InfoBarSeverityWarning
+	case ToastError:
+		return uixaml.InfoBarSeverityError
+	default:
+		return uixaml.InfoBarSeverityInformational
+	}
+}
+
 // winControl implements NativeControl around a single WinUI control.
 //
 // Only the accessors relevant to a control's kind are set; each queries an
@@ -275,12 +419,15 @@ type winControl struct {
 	asRadioButton      func() (*uixaml.IRadioButton, error)
 	asListBox          func() (*uixaml.IListBox, error)
 	asScrollViewer     func() (*uixaml.IScrollViewer, error)
+	asButton           func() (*uixaml.IButton, error)
 
 	attached  bool
 	applying  bool
 	items     *app.ItemsSource
 	itemsKey  string
 	sourceKey string
+	// menuWidget is the Menu widget this control renders.
+	menuWidget *Menu
 
 	// canvas is the concrete Canvas for container controls; it is kept alive for
 	// the lifetime of the control tree.
@@ -427,6 +574,20 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		c.asControl = scroll.AsControl
 		c.asScrollViewer = scroll.AsScrollViewer
 		c.asContentControl = scroll.AsContentControl
+	case ControlMenu:
+		btn, err := uixaml.NewButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create menu Button: %w", err)
+		}
+		c.asUIElement = btn.AsUIElement
+		c.asFrameworkElement = btn.AsFrameworkElement
+		c.asControl = btn.AsControl
+		c.asContentControl = btn.AsContentControl
+		c.asButtonBase = btn.AsButtonBase
+		c.asButton = btn.AsButton
+		if m, ok := w.(*Menu); ok {
+			c.menuWidget = m
+		}
 	default:
 		return nil, fmt.Errorf("winui3: unsupported control kind %s", kind)
 	} // Event wiring. Each handler calls back into the widget model; the applying
@@ -864,7 +1025,88 @@ func (c *winControl) applyProps(props ControlProps) {
 				return selector.SetSelectedIndex(int32(props.Selected))
 			})
 		}
+	case ControlMenu:
+		if c.asContentControl != nil {
+			_ = app.SetContent(c.asContentControl, props.Text)
+		}
+		c.applyMenuItems(props.MenuItems)
 	}
+}
+
+// applyMenuItems rebuilds a menu button's flyout when the items changed.
+func (c *winControl) applyMenuItems(items []MenuItem) {
+	if c.asButton == nil {
+		return
+	}
+	key := winMenuKey(items)
+	if key == c.itemsKey {
+		return
+	}
+	c.itemsKey = key
+
+	flyout, err := uixaml.NewMenuFlyout()
+	if err != nil {
+		return
+	}
+	flyoutAPI, err := flyout.AsMenuFlyout()
+	if err != nil {
+		return
+	}
+	vector, err := flyoutAPI.Items()
+	if err != nil {
+		return
+	}
+
+	target := c.menuWidget
+	for i, item := range items {
+		if item.Separator {
+			separator, sepErr := uixaml.NewMenuFlyoutSeparator()
+			if sepErr != nil {
+				continue
+			}
+			base, baseErr := separator.AsMenuFlyoutItemBase()
+			if baseErr == nil {
+				_ = vector.Append(base)
+			}
+			continue
+		}
+
+		entry, entryErr := uixaml.NewMenuFlyoutItem()
+		if entryErr != nil {
+			continue
+		}
+		index := i
+		if itemAPI, itemErr := entry.AsMenuFlyoutItem(); itemErr == nil {
+			_ = itemAPI.SetText(item.Label)
+			if control, controlErr := entry.AsControl(); controlErr == nil {
+				_ = control.SetIsEnabled(item.Enabled)
+			}
+			_, _ = app.On(itemAPI.AddClick, uixaml.NewRoutedEventHandler,
+				func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+					if c.applying || target == nil {
+						return
+					}
+					target.Select(index)
+				})
+		}
+		if base, baseErr := entry.AsMenuFlyoutItemBase(); baseErr == nil {
+			_ = vector.Append(base)
+		}
+	}
+
+	if base, baseErr := flyout.AsFlyoutBase(); baseErr == nil {
+		_ = app.With(c.asButton, func(button *uixaml.IButton) error {
+			return button.SetFlyout(base)
+		})
+	}
+}
+
+func winMenuKey(items []MenuItem) string {
+	var b strings.Builder
+	for _, item := range items {
+		fmt.Fprintf(&b, "%t|%t|%s\x00", item.Separator, item.Enabled, item.Label)
+	}
+	return b.String()
 }
 
 // setComboItems rebuilds the ItemsSource only when the list actually changed.

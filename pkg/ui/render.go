@@ -33,6 +33,8 @@ func kindOf(w Widget) ControlKind {
 		return ControlList
 	case *ScrollView:
 		return ControlScroll
+	case *Menu:
+		return ControlMenu
 	default:
 		return ControlContainer
 	}
@@ -87,6 +89,8 @@ func propsOf(w Widget) ControlProps {
 			Selected:      v.SelectedIndex(),
 			SelectionMode: int(v.GetSelectionMode()),
 		}
+	case *Menu:
+		return ControlProps{Text: v.GetLabel(), MenuItems: v.GetItems()}
 	default:
 		return ControlProps{}
 	}
@@ -120,6 +124,8 @@ func widgetBase(w Widget) *BaseWidget {
 	case *List:
 		return v.BaseWidget
 	case *ScrollView:
+		return v.BaseWidget
+	case *Menu:
 		return v.BaseWidget
 	default:
 		return nil

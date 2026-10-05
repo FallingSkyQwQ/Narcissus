@@ -122,6 +122,8 @@ type ControlProps struct {
 	Title string
 	// SelectionMode selects single (0) or multiple (1) selection in a list.
 	SelectionMode int
+	// MenuItems describes the entries of a menu button.
+	MenuItems []MenuItem
 }
 
 // NativeControl is a handle to a native control created by a Backend. All

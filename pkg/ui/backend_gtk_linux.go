@@ -23,6 +23,9 @@ func newPlatformBackend() Backend {
 	return &gtkBackend{}
 }
 
+// gtkBackend can present dialogs and toasts.
+var _ Presenter = (*gtkBackend)(nil)
+
 // gtkBackend implements Backend on top of GTK4.
 //
 // Layout stays owned by the framework's flex engine: every control is placed at
@@ -151,6 +154,101 @@ func (b *gtkBackend) Post(fn func()) error {
 
 func (b *gtkBackend) OnUIThread() bool {
 	return currentGoroutineID() == b.uiThreadID
+}
+
+// PresentDialog shows a modal GtkMessageDialog over the most recently created
+// window. It satisfies the Presenter capability.
+//
+// The dialog uses GtkDialog's action area so an arbitrary number of labelled
+// buttons is supported: each button reports its own index through OnResult.
+func (b *gtkBackend) PresentDialog(spec DialogSpec) error {
+	if b.app == nil {
+		return errors.New("gtk4: backend not initialized")
+	}
+	buttons := spec.Buttons
+	if len(buttons) == 0 {
+		buttons = []string{"OK"}
+	}
+
+	parent := b.activeWindow()
+	dialog := gtk.NewMessageDialog(parent, gtk.DialogModal, gtk.MessageInfo, gtk.ButtonsNone)
+	dialog.SetTitle(spec.Title)
+	dialog.SetMarkup(spec.Message)
+
+	onResult := spec.OnResult
+	dialog.ConnectResponse(func(responseID int) {
+		index := responseID - 1
+		dialog.Destroy()
+		if onResult != nil && index >= 0 && index < len(buttons) {
+			onResult(index)
+		}
+	})
+	for i, label := range buttons {
+		dialog.AddButton(label, i+1)
+	}
+	dialog.SetDefaultResponse(1)
+	dialog.Present()
+	return nil
+}
+
+// PresentToast shows a transient notification at the top of the window.
+func (b *gtkBackend) PresentToast(spec ToastSpec) error {
+	window := b.activeWindowWidget()
+	if window == nil {
+		return errors.New("gtk4: no window for toast")
+	}
+
+	revealer := gtk.NewRevealer()
+	revealer.SetTransitionType(gtk.RevealerTransitionTypeSlideDown)
+	label := gtk.NewLabel(spec.Message)
+	label.SetMarginTop(6)
+	label.SetMarginBottom(6)
+	label.SetMarginStart(12)
+	label.SetMarginEnd(12)
+	revealer.SetChild(label)
+
+	child := window.Child()
+	overlay, ok := child.(*gtk.Overlay)
+	if !ok {
+		return errors.New("gtk4: window has no overlay for toast")
+	}
+	overlay.AddOverlay(revealer)
+	revealer.SetHAlign(gtk.AlignCenter)
+	revealer.SetVAlign(gtk.AlignStart)
+	revealer.SetVisible(true)
+	revealer.SetRevealChild(true)
+
+	duration := spec.DurationMS
+	if duration <= 0 {
+		duration = DefaultToastDurationMS
+	}
+	time.AfterFunc(time.Duration(duration)*time.Millisecond, func() {
+		glib.IdleAdd(func() {
+			revealer.SetRevealChild(false)
+			time.AfterFunc(300*time.Millisecond, func() {
+				glib.IdleAdd(func() { overlay.RemoveOverlay(revealer) })
+			})
+		})
+	})
+	return nil
+}
+
+// activeWindow returns the GTK window of the most recently created window.
+func (b *gtkBackend) activeWindow() *gtk.Window {
+	if win := b.activeWindowWidget(); win != nil {
+		return &win.Window
+	}
+	return nil
+}
+
+// activeWindowWidget returns the most recently created window's widget.
+func (b *gtkBackend) activeWindowWidget() *gtk.ApplicationWindow {
+	for i := len(b.windows) - 1; i >= 0; i-- {
+		if win := b.windows[i].win; win != nil {
+			return win
+		}
+	}
+	return nil
 }
 
 // gtkWindow implements NativeWindow.
@@ -295,23 +393,29 @@ type gtkControl struct {
 	itemsKey string
 
 	// Typed handles for property updates and event wiring.
-	button   *gtk.Button
-	label    *gtk.Label
-	check    *gtk.CheckButton
-	dropdown *gtk.DropDown
-	scale    *gtk.Scale
-	picture  *gtk.Picture
-	entry    *gtk.Entry
-	textView *gtk.TextView
-	textBuf  *gtk.TextBuffer
-	progress *gtk.ProgressBar
-	toggle   *gtk.Switch
-	radio    *gtk.CheckButton
-	list     *gtk.ListBox
-	scroll   *gtk.ScrolledWindow
+	button     *gtk.Button
+	label      *gtk.Label
+	check      *gtk.CheckButton
+	dropdown   *gtk.DropDown
+	scale      *gtk.Scale
+	picture    *gtk.Picture
+	entry      *gtk.Entry
+	textView   *gtk.TextView
+	textBuf    *gtk.TextBuffer
+	progress   *gtk.ProgressBar
+	toggle     *gtk.Switch
+	radio      *gtk.CheckButton
+	list       *gtk.ListBox
+	scroll     *gtk.ScrolledWindow
+	menu       *gtk.MenuButton
+	popover    *gtk.Popover
+	menuBox    *gtk.Box
+	menuWidget *Menu
 
 	// listRows are the rows currently built for a list control.
 	listRows []*gtk.ListBoxRow
+	// menuKey is the joined menu item list last pushed to a menu control.
+	menuKey string
 }
 
 // newGTKSurface wraps a fresh GtkFixed as the root surface of a window.
@@ -423,6 +527,20 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		sw.SetPolicy(gtk.PolicyAutomatic, gtk.PolicyAutomatic)
 		c.scroll = sw
 		c.widget = sw
+	case ControlMenu:
+		mb := gtk.NewMenuButton()
+		mb.SetLabel(props.Text)
+		popover := gtk.NewPopover()
+		vbox := gtk.NewBox(gtk.OrientationVertical, 0)
+		popover.SetChild(vbox)
+		mb.SetPopover(popover)
+		c.menu = mb
+		c.popover = popover
+		c.menuBox = vbox
+		if m, ok := w.(*Menu); ok {
+			c.menuWidget = m
+		}
+		c.widget = mb
 	case ControlProgress:
 		pb := gtk.NewProgressBar()
 		c.progress = pb
@@ -579,7 +697,59 @@ func (c *gtkControl) applyProps(props ControlProps) {
 		}
 	case ControlList:
 		c.applyListItems(props)
+	case ControlMenu:
+		c.applyMenuItems(props)
 	}
+}
+
+// applyMenuItems rebuilds a menu popover's entries when the items changed.
+func (c *gtkControl) applyMenuItems(props ControlProps) {
+	if c.menu == nil || c.menuBox == nil {
+		return
+	}
+	c.menu.SetLabel(props.Text)
+
+	key := menuKey(props.MenuItems)
+	if key == c.menuKey {
+		return
+	}
+	c.menuKey = key
+
+	for {
+		first := c.menuBox.FirstChild()
+		if first == nil {
+			break
+		}
+		c.menuBox.Remove(first)
+	}
+
+	target := c.menuWidget
+	for i, item := range props.MenuItems {
+		if item.Separator {
+			c.menuBox.Append(gtk.NewSeparator(gtk.OrientationHorizontal))
+			continue
+		}
+		index := i
+		button := gtk.NewButtonWithLabel(item.Label)
+		button.SetSensitive(item.Enabled)
+		button.ConnectClicked(func() {
+			if c.popover != nil {
+				c.popover.Popdown()
+			}
+			if target != nil {
+				target.Select(index)
+			}
+		})
+		c.menuBox.Append(button)
+	}
+}
+
+func menuKey(items []MenuItem) string {
+	var b strings.Builder
+	for _, item := range items {
+		fmt.Fprintf(&b, "%t|%t|%s\x00", item.Separator, item.Enabled, item.Label)
+	}
+	return b.String()
 }
 
 // applyListItems rebuilds a list's rows when the items or mode changed.
