@@ -29,6 +29,10 @@ func kindOf(w Widget) ControlKind {
 		return ControlSwitch
 	case *RadioButton:
 		return ControlRadio
+	case *List:
+		return ControlList
+	case *ScrollView:
+		return ControlScroll
 	default:
 		return ControlContainer
 	}
@@ -77,6 +81,12 @@ func propsOf(w Widget) ControlProps {
 		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel()}
 	case *RadioButton:
 		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel(), Group: v.GetGroup()}
+	case *List:
+		return ControlProps{
+			Items:         v.GetItems(),
+			Selected:      v.SelectedIndex(),
+			SelectionMode: int(v.GetSelectionMode()),
+		}
 	default:
 		return ControlProps{}
 	}
@@ -106,6 +116,10 @@ func widgetBase(w Widget) *BaseWidget {
 	case *Switch:
 		return v.BaseWidget
 	case *RadioButton:
+		return v.BaseWidget
+	case *List:
+		return v.BaseWidget
+	case *ScrollView:
 		return v.BaseWidget
 	default:
 		return nil

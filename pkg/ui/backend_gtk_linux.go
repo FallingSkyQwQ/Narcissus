@@ -291,6 +291,8 @@ type gtkControl struct {
 	className string
 	provider  *gtk.CSSProvider
 	applying  bool
+	// itemsKey is the joined item list last pushed to a list control.
+	itemsKey string
 
 	// Typed handles for property updates and event wiring.
 	button   *gtk.Button
@@ -305,6 +307,11 @@ type gtkControl struct {
 	progress *gtk.ProgressBar
 	toggle   *gtk.Switch
 	radio    *gtk.CheckButton
+	list     *gtk.ListBox
+	scroll   *gtk.ScrolledWindow
+
+	// listRows are the rows currently built for a list control.
+	listRows []*gtk.ListBoxRow
 }
 
 // newGTKSurface wraps a fresh GtkFixed as the root surface of a window.
@@ -398,6 +405,24 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		}
 		c.picture = pic
 		c.widget = pic
+	case ControlList:
+		list := gtk.NewListBox()
+		list.SetSelectionMode(listSelectionMode(props.SelectionMode))
+		c.list = list
+		c.widget = list
+		list.ConnectRowSelected(func(row *gtk.ListBoxRow) {
+			if c.applying || row == nil {
+				return
+			}
+			if l, ok := w.(*List); ok {
+				l.Select(row.Index())
+			}
+		})
+	case ControlScroll:
+		sw := gtk.NewScrolledWindow()
+		sw.SetPolicy(gtk.PolicyAutomatic, gtk.PolicyAutomatic)
+		c.scroll = sw
+		c.widget = sw
 	case ControlProgress:
 		pb := gtk.NewProgressBar()
 		c.progress = pb
@@ -552,7 +577,45 @@ func (c *gtkControl) applyProps(props ControlProps) {
 			c.radio.SetActive(props.Checked)
 			c.radio.SetLabel(props.Text)
 		}
+	case ControlList:
+		c.applyListItems(props)
 	}
+}
+
+// applyListItems rebuilds a list's rows when the items or mode changed.
+func (c *gtkControl) applyListItems(props ControlProps) {
+	if c.list == nil {
+		return
+	}
+	c.list.SetSelectionMode(listSelectionMode(props.SelectionMode))
+
+	key := strings.Join(props.Items, "\x00")
+	if key != c.itemsKey {
+		c.itemsKey = key
+		for _, row := range c.listRows {
+			c.list.Remove(row)
+		}
+		c.listRows = c.listRows[:0]
+		for _, item := range props.Items {
+			row := gtk.NewListBoxRow()
+			row.SetChild(gtk.NewLabel(item))
+			c.list.Append(row)
+			c.listRows = append(c.listRows, row)
+		}
+	}
+
+	if props.Selected >= 0 && props.Selected < len(c.listRows) {
+		c.list.SelectRow(c.listRows[props.Selected])
+	} else {
+		c.list.UnselectAll()
+	}
+}
+
+func listSelectionMode(mode int) gtk.SelectionMode {
+	if mode == int(ListMultipleSelection) {
+		return gtk.SelectionMultiple
+	}
+	return gtk.SelectionSingle
 }
 
 func (c *gtkControl) AttachTo(parent NativeControl) {

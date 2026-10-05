@@ -273,6 +273,8 @@ type winControl struct {
 	asProgressBar      func() (*uixaml.IProgressBar, error)
 	asToggleSwitch     func() (*uixaml.IToggleSwitch, error)
 	asRadioButton      func() (*uixaml.IRadioButton, error)
+	asListBox          func() (*uixaml.IListBox, error)
+	asScrollViewer     func() (*uixaml.IScrollViewer, error)
 
 	attached  bool
 	applying  bool
@@ -404,6 +406,27 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		c.asContentControl = rb.AsContentControl
 		c.asToggleButton = rb.AsToggleButton
 		c.asRadioButton = rb.AsRadioButton
+	case ControlList:
+		list, err := uixaml.NewListBox()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ListBox: %w", err)
+		}
+		c.asUIElement = list.AsUIElement
+		c.asFrameworkElement = list.AsFrameworkElement
+		c.asControl = list.AsControl
+		c.asListBox = list.AsListBox
+		c.asItemsControl = list.AsItemsControl
+		c.asSelector = list.AsSelector
+	case ControlScroll:
+		scroll, err := uixaml.NewScrollViewer()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ScrollViewer: %w", err)
+		}
+		c.asUIElement = scroll.AsUIElement
+		c.asFrameworkElement = scroll.AsFrameworkElement
+		c.asControl = scroll.AsControl
+		c.asScrollViewer = scroll.AsScrollViewer
+		c.asContentControl = scroll.AsContentControl
 	default:
 		return nil, fmt.Errorf("winui3: unsupported control kind %s", kind)
 	} // Event wiring. Each handler calls back into the widget model; the applying
@@ -571,6 +594,31 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		toggle.Release()
 		if err != nil {
 			return nil, fmt.Errorf("winui3: wire RadioButton.Checked: %w", err)
+		}
+	case ControlList:
+		selector, err := c.asSelector()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query ISelector: %w", err)
+		}
+		_, err = app.On(selector.AddSelectionChanged, uixaml.NewSelectionChangedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.ISelectionChangedEventArgs) {
+				if c.applying {
+					return
+				}
+				list, ok := w.(*List)
+				if !ok {
+					return
+				}
+				index, readErr := withValue(c.asSelector, func(sel *uixaml.ISelector) (int32, error) {
+					return sel.SelectedIndex()
+				})
+				if readErr == nil && index >= 0 {
+					list.Select(int(index))
+				}
+			})
+		selector.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire ListBox.SelectionChanged: %w", err)
 		}
 	}
 
@@ -807,6 +855,13 @@ func (c *winControl) applyProps(props ControlProps) {
 		if c.asRadioButton != nil && props.Group != "" {
 			_ = app.With(c.asRadioButton, func(rb *uixaml.IRadioButton) error {
 				return rb.SetGroupName(props.Group)
+			})
+		}
+	case ControlList:
+		c.setComboItems(props.Items)
+		if c.asSelector != nil && props.Selected >= 0 && props.Selected < len(props.Items) {
+			_ = app.With(c.asSelector, func(selector *uixaml.ISelector) error {
+				return selector.SetSelectedIndex(int32(props.Selected))
 			})
 		}
 	}
