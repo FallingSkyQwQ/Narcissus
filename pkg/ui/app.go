@@ -128,6 +128,9 @@ func (a *App) Run() error {
 	a.window = window
 	a.mu.Unlock()
 
+	// Adopt the window's device pixel ratio so HiDPI-aware code can query it.
+	applyWindowPixelRatio(window)
+
 	if content != nil {
 		if err := window.SetContent(content); err != nil {
 			return err

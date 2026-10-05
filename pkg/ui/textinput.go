@@ -57,6 +57,7 @@ func NewTextInput() *TextInput {
 		valueSignal: reactive.NewSignal(""),
 		maxLength:   0, // 0 表示无限制
 	}
+	ti.SetFocusable(true)
 
 	// 设置默认样式
 	ti.style.BackgroundColor = ColorWhite
@@ -239,12 +240,14 @@ func (ti *TextInput) Clear() {
 
 // Focus 聚焦输入框
 func (ti *TextInput) Focus() {
-	// 实际实现应该调用底层 WinUI API
+	RequestFocus(ti)
 }
 
-// Blur 失焦输入框
+// Blur 让输入框失焦（仅当它当前持有焦点时）
 func (ti *TextInput) Blur() {
-	// 实际实现应该调用底层 WinUI API
+	if FocusedWidget() == ti {
+		RequestFocus(nil)
+	}
 }
 
 // Measure 测量输入框大小
@@ -321,11 +324,9 @@ func (ti *TextInput) HandleEvent(event Event) bool {
 	}
 
 	switch event.GetType() {
-	case EventFocus:
-		// 处理聚焦事件
-		return true
-	case EventBlur:
-		// 处理失焦事件
+	case EventFocus, EventBlur:
+		// 先分发给注册的处理器，再视为已处理。
+		ti.BaseWidget.HandleEvent(event)
 		return true
 	case EventInput:
 		// 处理输入事件

@@ -27,6 +27,22 @@ const (
 	ControlImage
 	// ControlTextInput maps to a single/multi-line text entry.
 	ControlTextInput
+	// ControlProgress maps to a progress indicator.
+	ControlProgress
+	// ControlSwitch maps to an on/off toggle switch.
+	ControlSwitch
+	// ControlRadio maps to a radio button.
+	ControlRadio
+	// ControlList maps to a scrollable list of selectable items.
+	ControlList
+	// ControlScroll maps to a scrollable container surface.
+	ControlScroll
+	// ControlMenu maps to a button that opens a menu.
+	ControlMenu
+	// ControlDialog maps to a modal dialog.
+	ControlDialog
+	// ControlToast maps to a transient notification.
+	ControlToast
 )
 
 // String returns a stable, human readable name for a ControlKind.
@@ -48,6 +64,22 @@ func (k ControlKind) String() string {
 		return "image"
 	case ControlTextInput:
 		return "textinput"
+	case ControlProgress:
+		return "progress"
+	case ControlSwitch:
+		return "switch"
+	case ControlRadio:
+		return "radio"
+	case ControlList:
+		return "list"
+	case ControlScroll:
+		return "scroll"
+	case ControlMenu:
+		return "menu"
+	case ControlDialog:
+		return "dialog"
+	case ControlToast:
+		return "toast"
 	default:
 		return "unknown"
 	}
@@ -80,6 +112,24 @@ type ControlProps struct {
 	Multiline bool
 	// ReadOnly reports whether a text input can be edited.
 	ReadOnly bool
+	// Indeterminate reports a progress indicator with no known value.
+	Indeterminate bool
+	// ShowText asks a progress indicator to render its value.
+	ShowText bool
+	// Group names the radio group an item belongs to.
+	Group string
+	// Title is the heading of a dialog or toast.
+	Title string
+	// SelectionMode selects single (0) or multiple (1) selection in a list.
+	SelectionMode int
+	// MenuItems describes the entries of a menu button.
+	MenuItems []MenuItem
+	// AccessibleName is the label assistive technology announces.
+	AccessibleName string
+	// AccessibleDescription is supplementary help text for assistive technology.
+	AccessibleDescription string
+	// AccessibleRole is the resolved role assistive technology announces.
+	AccessibleRole AccessibleRole
 }
 
 // NativeControl is a handle to a native control created by a Backend. All

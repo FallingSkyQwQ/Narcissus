@@ -157,12 +157,10 @@ func TestComputed(t *testing.T) {
 		t.Errorf("expected 5, got %d", sum.Get())
 	}
 
-	// Note: In this simplified implementation, Computed does not auto-update
-	// The value is computed once at creation
+	// Computed now tracks its dependencies and re-evaluates automatically.
 	a.Set(5)
-	// Value should still be 5 (the initial computed value)
-	if sum.Get() != 5 {
-		t.Errorf("expected 5 (initial computed value), got %d", sum.Get())
+	if sum.Get() != 8 {
+		t.Errorf("expected 8 after source change, got %d", sum.Get())
 	}
 
 	sum.Dispose()
@@ -213,14 +211,19 @@ func TestComputedSubscribe(t *testing.T) {
 		t.Errorf("expected initial value [2], got %v", received)
 	}
 
-	// Note: In this simplified implementation, Computed does not auto-update
-	// So changing source signals won't trigger updates
+	// Subscribed computeds are evaluated eagerly when a source changes.
 	a.Set(3)
-	if len(received) != 1 {
-		t.Errorf("expected no new values in simplified implementation, got %v", received)
+	if len(received) != 2 || received[1] != 6 {
+		t.Errorf("expected [2 6] after source change, got %v", received)
 	}
 
+	// After unsubscribing the computed goes back to lazy evaluation.
 	unsubscribe()
+	a.Set(4)
+	if len(received) != 2 {
+		t.Errorf("expected no further values after unsubscribe, got %v", received)
+	}
+
 	product.Dispose()
 }
 
@@ -238,13 +241,19 @@ func TestEffectBasic(t *testing.T) {
 		t.Errorf("expected effect to run once on creation, got %d calls", callCount)
 	}
 
-	// Note: In this simplified implementation, Effect does not auto-re-run on dependency change
+	// Effects now re-run automatically when a tracked signal changes.
 	s.Set(1)
-	if callCount != 1 {
-		t.Errorf("effect should not auto-run in simplified implementation, got %d calls", callCount)
+	if callCount != 2 {
+		t.Errorf("effect should auto-run on dependency change, got %d calls", callCount)
 	}
 
 	effect.Dispose()
+
+	// After dispose the effect stops reacting.
+	s.Set(2)
+	if callCount != 2 {
+		t.Errorf("disposed effect should not run again, got %d calls", callCount)
+	}
 }
 
 func TestEffectDispose(t *testing.T) {

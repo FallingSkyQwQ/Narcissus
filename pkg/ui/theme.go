@@ -130,6 +130,9 @@ func (tm *ThemeManager) SetTheme(theme Theme) {
 	tm.current = theme
 	tm.mu.Unlock()
 	tm.themeSignal.Set(theme)
+
+	// Keep the native toolkit's appearance in step with the framework theme.
+	applyThemeToBackend(theme)
 }
 
 // GetTheme 获取当前主题

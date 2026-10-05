@@ -237,3 +237,33 @@ func TestColumnDirectionUsesVerticalMainAxis(t *testing.T) {
 		t.Errorf("column tops = %g/%g, want 0/20", c.Items[0].Top, c.Items[1].Top)
 	}
 }
+
+// A content-sized item (auto cross size) stretches to the full line, even
+// though its measured cross size is non-zero — matching CSS/Yoga
+// align-items:stretch.
+func TestAlignStretchAutoCrossFillsLine(t *testing.T) {
+	c := NewContainer()
+	c.Direction = DirectionColumn
+	item := measuredItem(50, 20)
+	item.WidthAuto = true
+	c.AddItem(item)
+
+	c.Layout(0, 0, 200, 100)
+
+	if c.Items[0].Width != 200 {
+		t.Errorf("width = %g, want stretched 200", c.Items[0].Width)
+	}
+}
+
+// An item with a definite cross size keeps it under align-items:stretch.
+func TestAlignStretchLeavesDefiniteCross(t *testing.T) {
+	c := NewContainer()
+	c.Direction = DirectionColumn
+	c.AddItem(measuredItem(50, 20))
+
+	c.Layout(0, 0, 200, 100)
+
+	if c.Items[0].Width != 50 {
+		t.Errorf("width = %g, want definite 50", c.Items[0].Width)
+	}
+}

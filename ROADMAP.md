@@ -10,11 +10,11 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started
 |---|------|--------|-------|
 | 1 | Real text measurement | ✅ | `TextMeasurer` abstraction with a Pango-backed implementation for GTK4 and a documented fallback estimator. Text, Button, Checkbox and ComboBox measure through it. |
 | 2 | Complete the flex layout algorithm | ✅ | Intrinsic sizing for node-less items, margins/gaps, `flex-basis`, bounded grow/shrink, `align-content`, per-item stretch and min/max size constraints. |
-| 3 | Repository and documentation cleanup | 🚧 | `DESIGN.md` and `ROADMAP.md` are now tracked (previously ignored yet linked from the README); local build artifacts removed. A usage example gallery is still missing. |
-| 4 | Interaction layer: focus, keyboard, tab order | ⬜ | Key/mouse-enter/leave/focus events are declared but not wired in the backends. `TextInput.Focus`/`Blur` are stubs. |
-| 5 | Essential widgets | ⬜ | Missing ScrollView, List/ListBox, Dialog/Modal, Menu, ProgressBar, Radio/Switch, Tabs and Toast. Only 8 controls exist today. |
-| 6 | Accessibility and HiDPI | ⬜ | No accessibility tree or screen-reader support, and no device-pixel-ratio handling. |
-| 7 | Reactive auto dependency tracking | ⬜ | `Computed` needs a manual `Recompute` and `Effect` runs once; there is no automatic dependency collection or batching. |
+| 3 | Repository and documentation cleanup | ✅ | `DESIGN.md` and `ROADMAP.md` are tracked (previously ignored yet linked from the README); local build artifacts removed. A runnable usage gallery now lives under [`examples/`](./examples) with an index and a widget reference. |
+| 4 | Interaction layer: focus, keyboard, tab order | ✅ | Framework focus manager with `RequestFocus`, TAB traversal and focus/blur bubbling; key events routed to the focused widget and bubbled up. GTK4 wired (key controller + focus controllers). WinUI 3 focus/key wiring is deferred until that backend is verified. |
+| 5 | Essential widgets | ✅ | ScrollView, List/ListBox, Dialog/Modal, Menu, ProgressBar, Radio/Switch, Tabs and Toast added; 16 control kinds in total. Dialog and Toast present through the backend's optional `Presenter` capability. |
+| 6 | Accessibility and HiDPI | ✅ | Widgets carry an accessible name, description and role, exposed as a toolkit-neutral `AccessibilityTree`; GTK publishes accessible label/description and WinUI publishes `AutomationProperties`. The device pixel ratio is plumbed from the GTK scale factor and WinUI rasterization scale through `DevicePixelRatio` / `ScaleToDevice`. |
+| 7 | Reactive auto dependency tracking | ✅ | Dependency collection is automatic via a per-goroutine observer context: `Computed` re-evaluates lazily on read (eagerly while subscribed), `Effect` re-runs when a tracked source changes, and `Batch` coalesces a burst of updates into a single run. |
 
 ## Beyond the list
 

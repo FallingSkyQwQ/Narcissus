@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	syswinrt "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt"
 	"github.com/deploymenttheory/go-bindings-windowsappsdk/app"
@@ -44,11 +45,17 @@ func newPlatformBackend() Backend {
 	return &winBackend{}
 }
 
+// winBackend can present dialogs and toasts.
+var _ Presenter = (*winBackend)(nil)
+
 type winBackend struct {
 	mu         sync.Mutex
 	uiThreadID uint64
 	pending    []*winWindow
 	dispatcher *uidispatching.IDispatcherQueue
+	// active is the most recently built window, used as the owner for
+	// dialogs and toasts.
+	active *winWindow
 }
 
 func (b *winBackend) Name() string { return "winui3" }
@@ -204,6 +211,9 @@ func (w *winWindow) Close() {
 // native control, mounts the widget tree and activates the window.
 func (w *winWindow) build(ready *app.Ready) error {
 	w.window = ready.Window
+	w.backend.mu.Lock()
+	w.backend.active = w
+	w.backend.mu.Unlock()
 	if err := ready.Window.SetTitle(w.title); err != nil {
 		return fmt.Errorf("winui3: set title: %w", err)
 	}
@@ -239,12 +249,169 @@ func (w *winWindow) build(ready *app.Ready) error {
 	return nil
 }
 
+// DevicePixelRatio reports the rasterization scale of the window's XamlRoot,
+// or 1 before the window is built.
+func (w *winWindow) DevicePixelRatio() float32 {
+	if w.root == nil || w.root.asUIElement == nil {
+		return 1
+	}
+	ui, err := w.root.asUIElement()
+	if err != nil || ui == nil {
+		return 1
+	}
+	root, err := ui.XamlRoot()
+	if err != nil || root == nil {
+		return 1
+	}
+	scale, err := root.RasterizationScale()
+	if err != nil || scale <= 0 {
+		return 1
+	}
+	return float32(scale)
+}
+
 func (w *winWindow) relayout() {
 	if w.content == nil || w.root == nil {
 		return
 	}
+	SetDevicePixelRatio(w.DevicePixelRatio())
 	if err := layoutAndMount(w.backend, w.root, w.content, w.width, w.height); err != nil {
 		fmt.Fprintf(os.Stderr, "narcissus: layout error: %v\n", err)
+	}
+}
+
+// PresentDialog shows a modal ContentDialog owned by the active window. It
+// satisfies the Presenter capability.
+//
+// The dialog result is delivered asynchronously through the WinRT completion
+// handler, which marshals onto the UI thread; the buttons map Primary,
+// Secondary then Close to indices 0, 1 and 2.
+func (b *winBackend) PresentDialog(spec DialogSpec) error {
+	b.mu.Lock()
+	window := b.active
+	b.mu.Unlock()
+	if window == nil || window.window == nil {
+		return errors.New("winui3: no window for dialog")
+	}
+
+	dialog, err := uixaml.NewContentDialog()
+	if err != nil {
+		return fmt.Errorf("winui3: create ContentDialog: %w", err)
+	}
+	api, err := dialog.AsContentDialog()
+	if err != nil {
+		return fmt.Errorf("winui3: query IContentDialog: %w", err)
+	}
+
+	if err := app.With(dialog.AsContentControl, func(content *uixaml.IContentControl) error {
+		return app.SetContent(func() (*uixaml.IContentControl, error) { return content, nil }, spec.Message)
+	}); err != nil {
+		return fmt.Errorf("winui3: set dialog content: %w", err)
+	}
+
+	if title, titleErr := app.Box(spec.Title); titleErr == nil {
+		_ = api.SetTitle(title)
+		title.Release()
+	}
+	buttons := spec.Buttons
+	if len(buttons) == 0 {
+		buttons = []string{"OK"}
+	}
+	for i, label := range buttons {
+		switch i {
+		case 0:
+			_ = api.SetPrimaryButtonText(label)
+		case 1:
+			_ = api.SetSecondaryButtonText(label)
+		case 2:
+			_ = api.SetCloseButtonText(label)
+		}
+	}
+
+	// The dialog needs the XamlRoot of the window content to show. The dialog
+	// itself is a UIElement, so its own SetXamlRoot is used.
+	if window.root != nil && window.root.asUIElement != nil {
+		if root, rootErr := withValue(window.root.asUIElement, func(element *uixaml.IUIElement) (*uixaml.IXamlRoot, error) {
+			return element.XamlRoot()
+		}); rootErr == nil && root != nil {
+			_ = app.With(dialog.AsUIElement, func(element *uixaml.IUIElement) error {
+				return element.SetXamlRoot(root)
+			})
+			root.Release()
+		}
+	}
+
+	operation, err := api.ShowAsync()
+	if err != nil {
+		return fmt.Errorf("winui3: show ContentDialog: %w", err)
+	}
+
+	onResult := spec.OnResult
+	handler, err := uixaml.NewAsyncOperationCompletedHandlerOfContentDialogResult(
+		func(asyncInfo *uixaml.IAsyncOperationOfContentDialogResult, status wrtfoundation.AsyncStatus) {
+			if onResult == nil {
+				return
+			}
+			result, resultErr := asyncInfo.GetResults()
+			if resultErr != nil {
+				return
+			}
+			index := 0
+			switch result {
+			case uixaml.ContentDialogResultSecondary:
+				index = 1
+			case uixaml.ContentDialogResultNone:
+				index = 2
+			}
+			onResult(index)
+		})
+	if err != nil {
+		return fmt.Errorf("winui3: dialog completion handler: %w", err)
+	}
+	if err := operation.SetCompleted(handler); err != nil {
+		return fmt.Errorf("winui3: arm dialog completion: %w", err)
+	}
+	return nil
+}
+
+// PresentToast shows a transient InfoBar at the top of the active window.
+func (b *winBackend) PresentToast(spec ToastSpec) error {
+	b.mu.Lock()
+	window := b.active
+	b.mu.Unlock()
+	if window == nil || window.root == nil || window.root.asPanel == nil {
+		return errors.New("winui3: no window for toast")
+	}
+
+	bar, err := uixaml.NewInfoBar()
+	if err != nil {
+		return fmt.Errorf("winui3: create InfoBar: %w", err)
+	}
+	api, err := bar.AsInfoBar()
+	if err != nil {
+		return fmt.Errorf("winui3: query IInfoBar: %w", err)
+	}
+	_ = api.SetMessage(spec.Message)
+	_ = api.SetSeverity(infoBarSeverity(spec.Severity))
+	_ = api.SetIsClosable(true)
+
+	if err := app.Append(window.root.asPanel, bar.AsUIElement); err != nil {
+		return fmt.Errorf("winui3: append InfoBar: %w", err)
+	}
+	_ = api.SetIsOpen(true)
+	return nil
+}
+
+func infoBarSeverity(severity ToastSeverity) uixaml.InfoBarSeverity {
+	switch severity {
+	case ToastSuccess:
+		return uixaml.InfoBarSeveritySuccess
+	case ToastWarning:
+		return uixaml.InfoBarSeverityWarning
+	case ToastError:
+		return uixaml.InfoBarSeverityError
+	default:
+		return uixaml.InfoBarSeverityInformational
 	}
 }
 
@@ -270,12 +437,24 @@ type winControl struct {
 	asRangeBase        func() (*uixaml.IRangeBase, error)
 	asTextBox          func() (*uixaml.ITextBox, error)
 	asImage            func() (*uixaml.IImage, error)
+	asProgressBar      func() (*uixaml.IProgressBar, error)
+	asToggleSwitch     func() (*uixaml.IToggleSwitch, error)
+	asRadioButton      func() (*uixaml.IRadioButton, error)
+	asListBox          func() (*uixaml.IListBox, error)
+	asScrollViewer     func() (*uixaml.IScrollViewer, error)
+	asButton           func() (*uixaml.IButton, error)
+
+	// dep is the DependencyObject view of the control, used to publish
+	// accessibility properties.
+	dep *uixaml.IDependencyObject
 
 	attached  bool
 	applying  bool
 	items     *app.ItemsSource
 	itemsKey  string
 	sourceKey string
+	// menuWidget is the Menu widget this control renders.
+	menuWidget *Menu
 
 	// canvas is the concrete Canvas for container controls; it is kept alive for
 	// the lifetime of the control tree.
@@ -371,9 +550,86 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		c.asFrameworkElement = box.AsFrameworkElement
 		c.asControl = box.AsControl
 		c.asTextBox = box.AsTextBox
+	case ControlProgress:
+		pb, err := uixaml.NewProgressBar()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ProgressBar: %w", err)
+		}
+		c.asUIElement = pb.AsUIElement
+		c.asFrameworkElement = pb.AsFrameworkElement
+		c.asControl = pb.AsControl
+		c.asRangeBase = pb.AsRangeBase
+		c.asProgressBar = pb.AsProgressBar
+	case ControlSwitch:
+		sw, err := uixaml.NewToggleSwitch()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ToggleSwitch: %w", err)
+		}
+		c.asUIElement = sw.AsUIElement
+		c.asFrameworkElement = sw.AsFrameworkElement
+		c.asControl = sw.AsControl
+		c.asToggleSwitch = sw.AsToggleSwitch
+	case ControlRadio:
+		rb, err := uixaml.NewRadioButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create RadioButton: %w", err)
+		}
+		c.asUIElement = rb.AsUIElement
+		c.asFrameworkElement = rb.AsFrameworkElement
+		c.asControl = rb.AsControl
+		c.asContentControl = rb.AsContentControl
+		c.asToggleButton = rb.AsToggleButton
+		c.asRadioButton = rb.AsRadioButton
+	case ControlList:
+		list, err := uixaml.NewListBox()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ListBox: %w", err)
+		}
+		c.asUIElement = list.AsUIElement
+		c.asFrameworkElement = list.AsFrameworkElement
+		c.asControl = list.AsControl
+		c.asListBox = list.AsListBox
+		c.asItemsControl = list.AsItemsControl
+		c.asSelector = list.AsSelector
+	case ControlScroll:
+		scroll, err := uixaml.NewScrollViewer()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ScrollViewer: %w", err)
+		}
+		c.asUIElement = scroll.AsUIElement
+		c.asFrameworkElement = scroll.AsFrameworkElement
+		c.asControl = scroll.AsControl
+		c.asScrollViewer = scroll.AsScrollViewer
+		c.asContentControl = scroll.AsContentControl
+	case ControlMenu:
+		btn, err := uixaml.NewButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create menu Button: %w", err)
+		}
+		c.asUIElement = btn.AsUIElement
+		c.asFrameworkElement = btn.AsFrameworkElement
+		c.asControl = btn.AsControl
+		c.asContentControl = btn.AsContentControl
+		c.asButtonBase = btn.AsButtonBase
+		c.asButton = btn.AsButton
+		if m, ok := w.(*Menu); ok {
+			c.menuWidget = m
+		}
 	default:
 		return nil, fmt.Errorf("winui3: unsupported control kind %s", kind)
-	} // Event wiring. Each handler calls back into the widget model; the applying
+	}
+
+	// Resolve the DependencyObject view once, so accessibility properties can
+	// be published on every update without re-querying the interface.
+	if c.asUIElement != nil {
+		if ui, err := c.asUIElement(); err == nil && ui != nil {
+			if dep, err := winrt.QueryInterface[uixaml.IDependencyObject](unsafe.Pointer(ui), &uixaml.IID_IDependencyObject); err == nil {
+				c.dep = dep
+			}
+		}
+	}
+
+	// Event wiring. Each handler calls back into the widget model; the applying
 	// flag keeps our own property writes from re-entering the model. The
 	// interface a handler is registered through is released once the add call has
 	// returned -- the runtime holds its own reference to the handler.
@@ -496,18 +752,111 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		if err != nil {
 			return nil, fmt.Errorf("winui3: wire TextBox.TextChanged: %w", err)
 		}
+	case ControlSwitch:
+		toggle, err := c.asToggleSwitch()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query IToggleSwitch: %w", err)
+		}
+		_, err = app.On(toggle.AddToggled, uixaml.NewRoutedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+				if c.applying {
+					return
+				}
+				switchWidget, ok := w.(*Switch)
+				if !ok {
+					return
+				}
+				on, readErr := withValue(c.asToggleSwitch, func(t *uixaml.IToggleSwitch) (bool, error) {
+					return t.IsOn()
+				})
+				if readErr == nil {
+					switchWidget.Checked(on)
+				}
+			})
+		toggle.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire ToggleSwitch.Toggled: %w", err)
+		}
+	case ControlRadio:
+		toggle, err := c.asToggleButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query IToggleButton: %w", err)
+		}
+		_, err = app.On(toggle.AddChecked, uixaml.NewRoutedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+				if c.applying {
+					return
+				}
+				if radio, ok := w.(*RadioButton); ok {
+					radio.Checked(true)
+				}
+			})
+		toggle.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire RadioButton.Checked: %w", err)
+		}
+	case ControlList:
+		selector, err := c.asSelector()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query ISelector: %w", err)
+		}
+		_, err = app.On(selector.AddSelectionChanged, uixaml.NewSelectionChangedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.ISelectionChangedEventArgs) {
+				if c.applying {
+					return
+				}
+				list, ok := w.(*List)
+				if !ok {
+					return
+				}
+				index, readErr := withValue(c.asSelector, func(sel *uixaml.ISelector) (int32, error) {
+					return sel.SelectedIndex()
+				})
+				if readErr == nil && index >= 0 {
+					list.Select(int(index))
+				}
+			})
+		selector.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire ListBox.SelectionChanged: %w", err)
+		}
 	}
 
+	// Selecting a row while setting the initial props raises the toolkit's
+	// SelectionChanged event; guard it so the model is not called back during
+	// construction.
+	c.applying = true
 	c.applyProps(props)
+	c.applying = false
 	return c, nil
 }
 
 func (c *winControl) AttachTo(parent NativeControl) {
 	p, ok := parent.(*winControl)
-	if !ok || p == nil || p.asPanel == nil || c.asUIElement == nil {
+	if !ok || p == nil || c.asUIElement == nil {
 		return
 	}
 	if c.attached {
+		return
+	}
+
+	// A ScrollViewer is a content control, not a panel, so a ScrollView's child
+	// becomes its Content rather than a Canvas child.
+	if p.asPanel == nil && p.asContentControl != nil {
+		ui, err := c.asUIElement()
+		if err != nil || ui == nil {
+			return
+		}
+		if err := app.With(p.asContentControl, func(cc *uixaml.IContentControl) error {
+			return cc.SetContent((*syswinrt.IInspectable)(unsafe.Pointer(ui)))
+		}); err != nil {
+			return
+		}
+		c.attached = true
+		return
+	}
+
+	if p.asPanel == nil {
 		return
 	}
 	if err := app.Append(p.asPanel, c.asUIElement); err != nil {
@@ -625,6 +974,32 @@ func (c *winControl) Update(props ControlProps) {
 	c.applying = true
 	defer func() { c.applying = false }()
 	c.applyProps(props)
+	c.applyAccessibility(props)
+}
+
+// applyAccessibility publishes the accessible name and help text through the
+// WinUI automation properties so screen readers announce them. WinUI derives
+// the automation control type from the element class, so the role is left to
+// the toolkit.
+func (c *winControl) applyAccessibility(props ControlProps) {
+	if c.dep == nil {
+		return
+	}
+	if props.AccessibleName == "" && props.AccessibleDescription == "" {
+		return
+	}
+	statics, err := uixaml.AutomationPropertiesStatics()
+	if err != nil || statics == nil {
+		return
+	}
+	defer statics.Release()
+
+	if props.AccessibleName != "" {
+		_ = statics.SetName(c.dep, props.AccessibleName)
+	}
+	if props.AccessibleDescription != "" {
+		_ = statics.SetHelpText(c.dep, props.AccessibleDescription)
+	}
 }
 
 func (c *winControl) Destroy() {
@@ -694,7 +1069,134 @@ func (c *winControl) applyProps(props ControlProps) {
 		}
 	case ControlImage:
 		c.setImageSource(props.Source)
+	case ControlProgress:
+		if c.asRangeBase != nil {
+			_ = app.With(c.asRangeBase, func(rb *uixaml.IRangeBase) error {
+				return app.All(
+					rb.SetMinimum(props.Min),
+					rb.SetMaximum(props.Max),
+					rb.SetValue(props.Value),
+				)
+			})
+		}
+		if c.asProgressBar != nil {
+			_ = app.With(c.asProgressBar, func(pb *uixaml.IProgressBar) error {
+				return pb.SetIsIndeterminate(props.Indeterminate)
+			})
+		}
+	case ControlSwitch:
+		if c.asToggleSwitch != nil {
+			_ = app.With(c.asToggleSwitch, func(t *uixaml.IToggleSwitch) error {
+				return t.SetIsOn(props.Checked)
+			})
+		}
+	case ControlRadio:
+		if c.asContentControl != nil {
+			_ = app.SetContent(c.asContentControl, props.Text)
+		}
+		if c.asToggleButton != nil {
+			checked, err := app.BoxAs[uixaml.IReferenceOfBool](props.Checked, &uixaml.IID_IReferenceOfBool)
+			if err == nil {
+				_ = app.With(c.asToggleButton, func(toggle *uixaml.IToggleButton) error {
+					return toggle.SetIsChecked(checked)
+				})
+				checked.Release()
+			}
+		}
+		if c.asRadioButton != nil && props.Group != "" {
+			_ = app.With(c.asRadioButton, func(rb *uixaml.IRadioButton) error {
+				return rb.SetGroupName(props.Group)
+			})
+		}
+	case ControlList:
+		c.setComboItems(props.Items)
+		if c.asSelector != nil && props.Selected >= 0 && props.Selected < len(props.Items) {
+			_ = app.With(c.asSelector, func(selector *uixaml.ISelector) error {
+				return selector.SetSelectedIndex(int32(props.Selected))
+			})
+		}
+	case ControlMenu:
+		if c.asContentControl != nil {
+			_ = app.SetContent(c.asContentControl, props.Text)
+		}
+		c.applyMenuItems(props.MenuItems)
 	}
+}
+
+// applyMenuItems rebuilds a menu button's flyout when the items changed.
+func (c *winControl) applyMenuItems(items []MenuItem) {
+	if c.asButton == nil {
+		return
+	}
+	key := winMenuKey(items)
+	if key == c.itemsKey {
+		return
+	}
+	c.itemsKey = key
+
+	flyout, err := uixaml.NewMenuFlyout()
+	if err != nil {
+		return
+	}
+	flyoutAPI, err := flyout.AsMenuFlyout()
+	if err != nil {
+		return
+	}
+	vector, err := flyoutAPI.Items()
+	if err != nil {
+		return
+	}
+
+	target := c.menuWidget
+	for i, item := range items {
+		if item.Separator {
+			separator, sepErr := uixaml.NewMenuFlyoutSeparator()
+			if sepErr != nil {
+				continue
+			}
+			base, baseErr := separator.AsMenuFlyoutItemBase()
+			if baseErr == nil {
+				_ = vector.Append(base)
+			}
+			continue
+		}
+
+		entry, entryErr := uixaml.NewMenuFlyoutItem()
+		if entryErr != nil {
+			continue
+		}
+		index := i
+		if itemAPI, itemErr := entry.AsMenuFlyoutItem(); itemErr == nil {
+			_ = itemAPI.SetText(item.Label)
+			if control, controlErr := entry.AsControl(); controlErr == nil {
+				_ = control.SetIsEnabled(item.Enabled)
+			}
+			_, _ = app.On(itemAPI.AddClick, uixaml.NewRoutedEventHandler,
+				func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+					if c.applying || target == nil {
+						return
+					}
+					target.Select(index)
+				})
+		}
+		if base, baseErr := entry.AsMenuFlyoutItemBase(); baseErr == nil {
+			_ = vector.Append(base)
+		}
+	}
+
+	if base, baseErr := flyout.AsFlyoutBase(); baseErr == nil {
+		_ = app.With(c.asButton, func(button *uixaml.IButton) error {
+			return button.SetFlyout(base)
+		})
+	}
+}
+
+func winMenuKey(items []MenuItem) string {
+	var b strings.Builder
+	for _, item := range items {
+		fmt.Fprintf(&b, "%t|%t|%s\x00", item.Separator, item.Enabled, item.Label)
+	}
+	return b.String()
 }
 
 // setComboItems rebuilds the ItemsSource only when the list actually changed.

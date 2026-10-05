@@ -62,6 +62,16 @@ func itemBaseMain(item *Item, row bool) float32 {
 	return h
 }
 
+// itemCrossAuto reports whether an item's cross-axis size is indefinite
+// (content-sized), which is the condition under which align-items: stretch
+// fills the line's cross size.
+func itemCrossAuto(item *Item, row bool) bool {
+	if row {
+		return item.HeightAuto
+	}
+	return item.WidthAuto
+}
+
 // itemBaseCross resolves an item's cross-axis base size.
 func itemBaseCross(item *Item, row bool) float32 {
 	if row {

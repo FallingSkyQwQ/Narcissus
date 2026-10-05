@@ -23,13 +23,35 @@ func kindOf(w Widget) ControlKind {
 		return ControlImage
 	case *TextInput:
 		return ControlTextInput
+	case *ProgressBar:
+		return ControlProgress
+	case *Switch:
+		return ControlSwitch
+	case *RadioButton:
+		return ControlRadio
+	case *List:
+		return ControlList
+	case *ScrollView:
+		return ControlScroll
+	case *Menu:
+		return ControlMenu
 	default:
 		return ControlContainer
 	}
 }
 
-// propsOf extracts a toolkit-neutral property snapshot from a widget.
+// propsOf extracts a toolkit-neutral property snapshot from a widget,
+// including the resolved accessibility semantics shared by every widget.
 func propsOf(w Widget) ControlProps {
+	props := widgetProps(w)
+	props.AccessibleName = accessibleNameFor(w)
+	props.AccessibleDescription = accessibleDescriptionFor(w)
+	props.AccessibleRole = accessibleRoleFor(w)
+	return props
+}
+
+// widgetProps extracts the kind-specific properties of a widget.
+func widgetProps(w Widget) ControlProps {
 	switch v := w.(type) {
 	case *Button:
 		return ControlProps{Text: v.GetText()}
@@ -59,6 +81,26 @@ func propsOf(w Widget) ControlProps {
 			Multiline:   v.GetInputType() == TextInputTypeMultiline,
 			ReadOnly:    v.IsReadOnly(),
 		}
+	case *ProgressBar:
+		return ControlProps{
+			Value:         float64(v.GetValue()),
+			Min:           float64(v.GetMin()),
+			Max:           float64(v.GetMax()),
+			Indeterminate: v.IsIndeterminate(),
+			ShowText:      v.IsShowingText(),
+		}
+	case *Switch:
+		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel()}
+	case *RadioButton:
+		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel(), Group: v.GetGroup()}
+	case *List:
+		return ControlProps{
+			Items:         v.GetItems(),
+			Selected:      v.SelectedIndex(),
+			SelectionMode: int(v.GetSelectionMode()),
+		}
+	case *Menu:
+		return ControlProps{Text: v.GetLabel(), MenuItems: v.GetItems()}
 	default:
 		return ControlProps{}
 	}
@@ -82,6 +124,18 @@ func widgetBase(w Widget) *BaseWidget {
 	case *Image:
 		return v.BaseWidget
 	case *TextInput:
+		return v.BaseWidget
+	case *ProgressBar:
+		return v.BaseWidget
+	case *Switch:
+		return v.BaseWidget
+	case *RadioButton:
+		return v.BaseWidget
+	case *List:
+		return v.BaseWidget
+	case *ScrollView:
+		return v.BaseWidget
+	case *Menu:
 		return v.BaseWidget
 	default:
 		return nil
@@ -115,6 +169,8 @@ func layoutAndMount(backend Backend, surface NativeControl, content Widget, widt
 	if content == nil {
 		return nil
 	}
+	// TAB traversal walks the tree that was mounted last.
+	SetFocusRoot(content)
 	if width <= 0 {
 		width = 800
 	}
@@ -132,7 +188,12 @@ func layoutAndMount(backend Backend, surface NativeControl, content Widget, widt
 	content.Measure(constraints)
 	content.Layout(0, 0, width, height)
 
-	return mountRecursive(backend, surface, content, 0, 0)
+	if err := mountRecursive(backend, surface, content, 0, 0); err != nil {
+		return err
+	}
+	// The toolkit is now initialized and the first window laid out.
+	fireReady()
+	return nil
 }
 
 // mountRecursive creates (once) and positions the native control for w inside

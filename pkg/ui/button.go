@@ -20,6 +20,7 @@ func NewButton() *Button {
 	b := &Button{
 		BaseWidget: NewBaseWidget(),
 	}
+	b.SetFocusable(true)
 
 	// 设置默认样式
 	b.style.BackgroundColor = ColorPrimary
