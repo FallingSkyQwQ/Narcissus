@@ -74,6 +74,7 @@ The [`examples/`](./examples) directory contains runnable applications covering
 the widget set, the flexbox layout engine, reactive state and modal overlays:
 
 ```bash
+go run ./examples/gallery   # the full showcase
 go run ./examples/hello
 go run ./examples/counter
 go run ./examples/widgets
