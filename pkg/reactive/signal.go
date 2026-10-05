@@ -5,12 +5,18 @@ import (
 	"sync/atomic"
 )
 
-// Signal represents a reactive state container
+// Signal represents a reactive state container.
+//
+// Reads inside a Computed or Effect are tracked automatically: a Set
+// invalidates every computation that read the signal, and effects re-run on
+// their own. Explicit observers registered with Subscribe keep the original
+// eager semantics and are notified immediately on every Set.
 type Signal[T any] struct {
 	mu        sync.RWMutex
 	value     T
 	version   uint64
 	observers map[uint64]func(T)
+	deps      map[*dependent]struct{}
 	nextID    atomic.Uint64
 }
 
@@ -19,17 +25,25 @@ func NewSignal[T any](initial T) *Signal[T] {
 	return &Signal[T]{
 		value:     initial,
 		observers: make(map[uint64]func(T)),
+		deps:      make(map[*dependent]struct{}),
 	}
 }
 
-// Get returns the current value
+// Get returns the current value. When called during a tracked computation the
+// signal is recorded as a dependency of that computation.
 func (s *Signal[T]) Get() T {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.value
+	value := s.value
+	s.mu.RUnlock()
+
+	if d := currentDependent(); d != nil {
+		d.trackSource(s)
+	}
+	return value
 }
 
-// Set updates the value and notifies observers
+// Set updates the value, notifies explicit observers and invalidates every
+// dependent computation.
 func (s *Signal[T]) Set(newValue T) {
 	s.mu.Lock()
 	s.value = newValue
@@ -38,11 +52,23 @@ func (s *Signal[T]) Set(newValue T) {
 	for _, observer := range s.observers {
 		observers = append(observers, observer)
 	}
+	deps := make([]*dependent, 0, len(s.deps))
+	for d := range s.deps {
+		deps = append(deps, d)
+	}
 	s.mu.Unlock()
 
-	// Notify outside of lock to prevent deadlocks
+	// Notify outside of lock to prevent deadlocks. Every dependent is marked
+	// stale before the eager queue drains, so an effect never observes a
+	// half-updated dependency graph.
+	beginMutation()
+	defer endMutation()
+
 	for _, observer := range observers {
 		observer(newValue)
+	}
+	for _, d := range deps {
+		d.invalidate()
 	}
 }
 
@@ -75,4 +101,18 @@ func (s *Signal[T]) Subscribe(observer func(T)) func() {
 		delete(s.observers, id)
 		s.mu.Unlock()
 	}
+}
+
+// addDependent / removeDependent implement source so Signal can feed Computed
+// and Effect.
+func (s *Signal[T]) addDependent(d *dependent) {
+	s.mu.Lock()
+	s.deps[d] = struct{}{}
+	s.mu.Unlock()
+}
+
+func (s *Signal[T]) removeDependent(d *dependent) {
+	s.mu.Lock()
+	delete(s.deps, d)
+	s.mu.Unlock()
 }

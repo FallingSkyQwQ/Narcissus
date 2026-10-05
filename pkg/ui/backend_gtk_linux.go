@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	coreglib "github.com/diamondburned/gotk4/pkg/core/glib"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
@@ -345,10 +346,24 @@ func (gw *gtkWindow) SetContent(content Widget) error {
 	return nil
 }
 
+// DevicePixelRatio reports GTK's scale factor for the window, or 1 before the
+// window is materialized.
+func (gw *gtkWindow) DevicePixelRatio() float32 {
+	if gw.win != nil {
+		if factor := gw.win.ScaleFactor(); factor > 0 {
+			return float32(factor)
+		}
+	}
+	return 1
+}
+
 func (gw *gtkWindow) relayout(width, height float32) {
 	if gw.content == nil || gw.root == nil {
 		return
 	}
+	// The monitor can change while a window is open, so refresh the ratio on
+	// every layout pass.
+	SetDevicePixelRatio(gw.DevicePixelRatio())
 	if width <= 0 {
 		width = gw.width
 	}
@@ -699,6 +714,29 @@ func (c *gtkControl) applyProps(props ControlProps) {
 		c.applyListItems(props)
 	case ControlMenu:
 		c.applyMenuItems(props)
+	}
+	c.applyAccessibility(props)
+}
+
+// applyAccessibility publishes the label and description to GTK's
+// accessibility layer so screen readers announce them. GTK derives the role
+// from the widget class, so only the text properties are set here.
+func (c *gtkControl) applyAccessibility(props ControlProps) {
+	if c.base == nil {
+		return
+	}
+	var properties []gtk.AccessibleProperty
+	var values []coreglib.Value
+	if props.AccessibleName != "" {
+		properties = append(properties, gtk.AccessiblePropertyLabel)
+		values = append(values, *coreglib.NewValue(props.AccessibleName))
+	}
+	if props.AccessibleDescription != "" {
+		properties = append(properties, gtk.AccessiblePropertyDescription)
+		values = append(values, *coreglib.NewValue(props.AccessibleDescription))
+	}
+	if len(properties) > 0 {
+		c.base.UpdateProperty(properties, values)
 	}
 }
 

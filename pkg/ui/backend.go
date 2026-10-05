@@ -124,6 +124,12 @@ type ControlProps struct {
 	SelectionMode int
 	// MenuItems describes the entries of a menu button.
 	MenuItems []MenuItem
+	// AccessibleName is the label assistive technology announces.
+	AccessibleName string
+	// AccessibleDescription is supplementary help text for assistive technology.
+	AccessibleDescription string
+	// AccessibleRole is the resolved role assistive technology announces.
+	AccessibleRole AccessibleRole
 }
 
 // NativeControl is a handle to a native control created by a Backend. All

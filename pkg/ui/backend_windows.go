@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	syswinrt "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt"
 	"github.com/deploymenttheory/go-bindings-windowsappsdk/app"
@@ -248,10 +249,32 @@ func (w *winWindow) build(ready *app.Ready) error {
 	return nil
 }
 
+// DevicePixelRatio reports the rasterization scale of the window's XamlRoot,
+// or 1 before the window is built.
+func (w *winWindow) DevicePixelRatio() float32 {
+	if w.root == nil || w.root.asUIElement == nil {
+		return 1
+	}
+	ui, err := w.root.asUIElement()
+	if err != nil || ui == nil {
+		return 1
+	}
+	root, err := ui.XamlRoot()
+	if err != nil || root == nil {
+		return 1
+	}
+	scale, err := root.RasterizationScale()
+	if err != nil || scale <= 0 {
+		return 1
+	}
+	return float32(scale)
+}
+
 func (w *winWindow) relayout() {
 	if w.content == nil || w.root == nil {
 		return
 	}
+	SetDevicePixelRatio(w.DevicePixelRatio())
 	if err := layoutAndMount(w.backend, w.root, w.content, w.width, w.height); err != nil {
 		fmt.Fprintf(os.Stderr, "narcissus: layout error: %v\n", err)
 	}
@@ -420,6 +443,10 @@ type winControl struct {
 	asListBox          func() (*uixaml.IListBox, error)
 	asScrollViewer     func() (*uixaml.IScrollViewer, error)
 	asButton           func() (*uixaml.IButton, error)
+
+	// dep is the DependencyObject view of the control, used to publish
+	// accessibility properties.
+	dep *uixaml.IDependencyObject
 
 	attached  bool
 	applying  bool
@@ -590,7 +617,19 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		}
 	default:
 		return nil, fmt.Errorf("winui3: unsupported control kind %s", kind)
-	} // Event wiring. Each handler calls back into the widget model; the applying
+	}
+
+	// Resolve the DependencyObject view once, so accessibility properties can
+	// be published on every update without re-querying the interface.
+	if c.asUIElement != nil {
+		if ui, err := c.asUIElement(); err == nil && ui != nil {
+			if dep, err := winrt.QueryInterface[uixaml.IDependencyObject](unsafe.Pointer(ui), &uixaml.IID_IDependencyObject); err == nil {
+				c.dep = dep
+			}
+		}
+	}
+
+	// Event wiring. Each handler calls back into the widget model; the applying
 	// flag keeps our own property writes from re-entering the model. The
 	// interface a handler is registered through is released once the add call has
 	// returned -- the runtime holds its own reference to the handler.
@@ -910,6 +949,32 @@ func (c *winControl) Update(props ControlProps) {
 	c.applying = true
 	defer func() { c.applying = false }()
 	c.applyProps(props)
+	c.applyAccessibility(props)
+}
+
+// applyAccessibility publishes the accessible name and help text through the
+// WinUI automation properties so screen readers announce them. WinUI derives
+// the automation control type from the element class, so the role is left to
+// the toolkit.
+func (c *winControl) applyAccessibility(props ControlProps) {
+	if c.dep == nil {
+		return
+	}
+	if props.AccessibleName == "" && props.AccessibleDescription == "" {
+		return
+	}
+	statics, err := uixaml.AutomationPropertiesStatics()
+	if err != nil || statics == nil {
+		return
+	}
+	defer statics.Release()
+
+	if props.AccessibleName != "" {
+		_ = statics.SetName(c.dep, props.AccessibleName)
+	}
+	if props.AccessibleDescription != "" {
+		_ = statics.SetHelpText(c.dep, props.AccessibleDescription)
+	}
 }
 
 func (c *winControl) Destroy() {

@@ -20,6 +20,7 @@ pkg/reactive     signals and UI-thread dispatch
 pkg/bridge       low-level COM/WinRT helpers for the WinUI 3 backend
 cmd/narc         the CLI (init / run / build / package / doctor / version)
 internal/        CLI internals (build, doctor, pack, runner, scaffold)
+examples/        runnable example applications (see examples/README.md)
 ```
 
 `pkg/layout/flex` and `pkg/reactive` have no dependency on `pkg/ui`, so they can
@@ -112,8 +113,44 @@ backend turns a `Style` into a per-widget CSS rule.
 ## Reactivity
 
 `pkg/reactive` provides `Signal` (observable state), `Computed` and `Effect`.
+Reads performed while a computation runs are recorded automatically: a
+computation is evaluated with itself pushed onto a per-goroutine observer
+context, and every `Signal.Get` / `Computed.Get` it makes registers as a
+dependency. `Set` marks the signal's dependents stale and invalidations
+propagate downstream, so a chain of computeds and effects stays consistent.
+
+`Computed` evaluates lazily — it recomputes on the next read after a source
+changed, and stays lazy while nothing observes it. It switches to eager
+re-evaluation while it has at least one `Subscribe` observer. `Effect` re-runs
+whenever any signal or computed it read changes; `Batch` (and every `Set`,
+which is implicitly transactional) coalesces a burst of updates into a single
+run. Explicit `Subscribe` observers keep their immediate, per-`Set` semantics.
+
 Updates are marshaled onto the toolkit UI thread through a `Dispatcher` that
-`App.Run` installs. Dependency tracking is currently manual; see the roadmap.
+`App.Run` installs.
+
+## Accessibility
+
+Every widget carries an accessible name, description and role on
+`BaseWidget`, set with `SetAccessibleName` / `SetAccessibleDescription` /
+`SetAccessibleRole` (or `SetAccessibility`). Unset names fall back to the
+widget's own content and unset roles to the kind's default, so common controls
+are labelled without extra work. `AccessibilityTree` turns the widget tree into
+a toolkit-neutral tree of `AccessibleNode`s in document order, skipping hidden
+widgets; it needs no display and is unit-tested.
+
+Backends publish the resolved semantics from `ControlProps`: GTK4 sets the
+accessible label and description with `gtk_accessible_update_property`, and
+WinUI 3 sets `AutomationProperties.Name` / `HelpText`. Both toolkits derive the
+final role from the native control class.
+
+## Density and HiDPI
+
+Widgets lay out in logical, density-independent pixels; the toolkit scales them
+to the display. The window's device pixel ratio is read from GTK's scale factor
+and WinUI's rasterization scale, stored centrally, and exposed through
+`DevicePixelRatio`, `ScaleToDevice` and `ScaleToLogical`. The ratio is refreshed
+on every layout pass so it tracks a window moving between monitors.
 
 ## Platform support
 

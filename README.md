@@ -1,9 +1,10 @@
 # Narcissus
 Build native UI apps with Go.
 
-Narcissus provides a declarative widget model, a flexbox layout engine and
-reactive state. The platform-specific rendering lives behind a single backend
-interface, so the same application code runs on multiple toolkits:
+Narcissus provides a declarative widget model, a flexbox layout engine,
+reactive state and a toolkit-neutral accessibility tree. The platform-specific
+rendering lives behind a single backend interface, so the same application code
+runs on multiple toolkits:
 
 | Platform | Toolkit | Status |
 |----------|---------|--------|
@@ -66,6 +67,17 @@ Pass `--no-windows-app-sdk` to skip both steps.
 | `narc package` | Create MSIX package (Windows) |
 | `narc doctor` | Check environment |
 | `narc version` | Show version |
+
+## Examples
+
+The [`examples/`](./examples) directory contains runnable applications covering
+the widget set, the flexbox layout engine, reactive state and modal overlays:
+
+```bash
+go run ./examples/hello
+go run ./examples/counter
+go run ./examples/widgets
+```
 
 ## Requirements
 

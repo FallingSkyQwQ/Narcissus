@@ -40,8 +40,18 @@ func kindOf(w Widget) ControlKind {
 	}
 }
 
-// propsOf extracts a toolkit-neutral property snapshot from a widget.
+// propsOf extracts a toolkit-neutral property snapshot from a widget,
+// including the resolved accessibility semantics shared by every widget.
 func propsOf(w Widget) ControlProps {
+	props := widgetProps(w)
+	props.AccessibleName = accessibleNameFor(w)
+	props.AccessibleDescription = accessibleDescriptionFor(w)
+	props.AccessibleRole = accessibleRoleFor(w)
+	return props
+}
+
+// widgetProps extracts the kind-specific properties of a widget.
+func widgetProps(w Widget) ControlProps {
 	switch v := w.(type) {
 	case *Button:
 		return ControlProps{Text: v.GetText()}

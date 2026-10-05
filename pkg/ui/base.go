@@ -45,6 +45,11 @@ type BaseWidget struct {
 	enabled   bool
 	focusable bool
 
+	// 无障碍语义（供辅助技术读取）
+	accessibleName        string
+	accessibleDescription string
+	accessibleRole        AccessibleRole
+
 	// 原生控件句柄（由平台后端创建，未挂载时为 nil）
 	native NativeControl
 
@@ -240,6 +245,58 @@ func (bw *BaseWidget) IsFocusable() bool {
 	bw.mu.RLock()
 	defer bw.mu.RUnlock()
 	return bw.focusable
+}
+
+// SetAccessibility 一次性设置组件的无障碍角色、名称与描述。设置后会在下次
+// 布局或状态同步时推送到原生控件，并被 AccessibilityTree 读取。
+func (bw *BaseWidget) SetAccessibility(role AccessibleRole, name, description string) {
+	bw.mu.Lock()
+	bw.accessibleRole = role
+	bw.accessibleName = name
+	bw.accessibleDescription = description
+	bw.mu.Unlock()
+}
+
+// SetAccessibleRole 设置无障碍角色（RoleNone 表示按组件类型推断）。
+func (bw *BaseWidget) SetAccessibleRole(role AccessibleRole) {
+	bw.mu.Lock()
+	bw.accessibleRole = role
+	bw.mu.Unlock()
+}
+
+// AccessibleRole 返回显式设置的无障碍角色，未设置时为 RoleNone。
+func (bw *BaseWidget) AccessibleRole() AccessibleRole {
+	bw.mu.RLock()
+	defer bw.mu.RUnlock()
+	return bw.accessibleRole
+}
+
+// SetAccessibleName 设置辅助技术朗读的名称。
+func (bw *BaseWidget) SetAccessibleName(name string) {
+	bw.mu.Lock()
+	bw.accessibleName = name
+	bw.mu.Unlock()
+}
+
+// AccessibleName 返回显式设置的无障碍名称。
+func (bw *BaseWidget) AccessibleName() string {
+	bw.mu.RLock()
+	defer bw.mu.RUnlock()
+	return bw.accessibleName
+}
+
+// SetAccessibleDescription 设置辅助技术朗读的补充描述。
+func (bw *BaseWidget) SetAccessibleDescription(description string) {
+	bw.mu.Lock()
+	bw.accessibleDescription = description
+	bw.mu.Unlock()
+}
+
+// AccessibleDescription 返回显式设置的无障碍描述。
+func (bw *BaseWidget) AccessibleDescription() string {
+	bw.mu.RLock()
+	defer bw.mu.RUnlock()
+	return bw.accessibleDescription
 }
 
 // GetEnabled 获取启用状态
