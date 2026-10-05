@@ -141,6 +141,7 @@ func (c *Container) Padding(padding Insets) *Container {
 // BackgroundColor 设置背景色（链式调用）
 func (c *Container) BackgroundColor(color Color) *Container {
 	c.style.BackgroundColor = color
+	syncWidget(c)
 	return c
 }
 
@@ -305,6 +306,8 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 			PaddingBottom: childStyle.Padding.Bottom,
 			PaddingLeft:   childStyle.Padding.Left,
 		}
+		// 同步测量尺寸，flex 引擎在布局阶段通过 GetMeasuredSize 读取
+		item.SetMeasuredSize(childSize.Width, childSize.Height)
 		c.flexContainer.AddItem(item)
 	}
 
@@ -418,6 +421,7 @@ func (c *Container) Layout(x, y, width, height float32) {
 			PaddingBottom: style.Padding.Bottom,
 			PaddingLeft:   style.Padding.Left,
 		}
+		item.SetMeasuredSize(measuredWidth, measuredHeight)
 		c.flexContainer.AddItem(item)
 	}
 
@@ -432,18 +436,7 @@ func (c *Container) Layout(x, y, width, height float32) {
 	}
 }
 
-// Render 渲染容器
+// Render 渲染容器：同步自身状态；子组件由窗口在挂载/布局时递归处理
 func (c *Container) Render() error {
-	if !c.GetVisible() {
-		return nil
-	}
-
-	// 渲染子组件
-	for _, child := range c.children {
-		if err := child.Render(); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return renderWidget(c)
 }

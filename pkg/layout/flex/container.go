@@ -199,12 +199,17 @@ func (c *Container) Layout(x, y, width, height float32) {
 				}
 			}
 
-			// Calculate cross-axis position
+			// Calculate cross-axis position. For rows the cross axis is the
+			// height, for columns it is the width.
 			align := c.Align
 			if item.AlignSelf != AlignAuto {
 				align = item.AlignSelf
 			}
-			itemCrossOffset := calculateAlignment(align, h, line.CrossSize)
+			crossItemSize := h
+			if !isRow {
+				crossItemSize = w
+			}
+			itemCrossOffset := calculateAlignment(align, crossItemSize, line.CrossSize)
 
 			// Set final position and size
 			if isRow {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/FallingSkyQwQ/Narcissus/internal/build"
 	"github.com/FallingSkyQwQ/Narcissus/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +22,7 @@ The first run will create a .air.toml configuration file if it doesn't exist.
 
 Example:
   narc run
+  narc run --target linux
   narc run --dir ./myapp`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		projectDir, _ := cmd.Flags().GetString("dir")
@@ -31,7 +33,12 @@ Example:
 		if _, err := os.Stat(mainFile); os.IsNotExist(err) {
 			return fmt.Errorf("not a Narcissus project: %s/main.go not found", projectDir)
 		}
-		if err := runner.RunWithAir(projectDir); err != nil {
+		target, _ := cmd.Flags().GetString("target")
+		goos, _, err := build.ResolveTarget(build.Options{Target: target})
+		if err != nil {
+			return err
+		}
+		if err := runner.RunWithAir(projectDir, goos); err != nil {
 			return err
 		}
 		return nil
@@ -40,5 +47,6 @@ Example:
 
 func init() {
 	runCmd.Flags().String("dir", "", "Project directory (default: current directory)")
+	runCmd.Flags().String("target", "", "Target OS: windows, linux or darwin (default: host OS)")
 	rootCmd.AddCommand(runCmd)
 }

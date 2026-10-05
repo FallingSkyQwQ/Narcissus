@@ -35,6 +35,7 @@ func (t *Text) Text(text string) *Text {
 	t.text = text
 	// 清除测量缓存，下次测量时重新计算
 	t.measured = false
+	syncWidget(t)
 	return t
 }
 
@@ -46,6 +47,7 @@ func (t *Text) GetText() string {
 // TextColor 设置文本颜色（链式调用）
 func (t *Text) TextColor(color Color) *Text {
 	t.style.TextColor = color
+	syncWidget(t)
 	return t
 }
 
@@ -59,6 +61,7 @@ func (t *Text) TextColorToken(token ColorToken) *Text {
 func (t *Text) FontSize(size float32) *Text {
 	t.style.Font.Size = size
 	t.measured = false
+	syncWidget(t)
 	return t
 }
 
@@ -66,6 +69,7 @@ func (t *Text) FontSize(size float32) *Text {
 func (t *Text) FontWeight(weight FontWeight) *Text {
 	t.style.Font.Weight = weight
 	t.measured = false
+	syncWidget(t)
 	return t
 }
 
@@ -201,13 +205,7 @@ func (t *Text) Layout(x, y, width, height float32) {
 	t.flexItem.Height = height
 }
 
-// Render 渲染文本组件
+// Render 渲染文本组件：将当前状态同步到后端已创建的原生控件
 func (t *Text) Render() error {
-	if !t.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 TextBlock
-	// 这里只是占位实现
-	return nil
+	return renderWidget(t)
 }

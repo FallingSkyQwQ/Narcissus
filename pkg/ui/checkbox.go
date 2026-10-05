@@ -42,6 +42,7 @@ func (cb *Checkbox) Checked(checked bool) *Checkbox {
 	oldChecked := cb.checked
 	cb.checked = checked
 	cb.checkedSignal.Set(checked)
+	syncWidget(cb)
 
 	// 触发变更事件
 	if oldChecked != checked && cb.onChange != nil {
@@ -64,6 +65,7 @@ func (cb *Checkbox) GetCheckedSignal() *reactive.Signal[bool] {
 // Label 设置标签文本（链式调用）
 func (cb *Checkbox) Label(label string) *Checkbox {
 	cb.label = label
+	syncWidget(cb)
 	return cb
 }
 
@@ -180,15 +182,9 @@ func (cb *Checkbox) Layout(x, y, width, height float32) {
 	cb.flexItem.Height = height
 }
 
-// Render 渲染复选框
+// Render 渲染复选框：将当前状态同步到后端已创建的原生控件
 func (cb *Checkbox) Render() error {
-	if !cb.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 CheckBox
-	// 这里只是占位实现
-	return nil
+	return renderWidget(cb)
 }
 
 // HandleEvent 处理事件

@@ -44,6 +44,9 @@ type BaseWidget struct {
 	visible bool
 	enabled bool
 
+	// 原生控件句柄（由平台后端创建，未挂载时为 nil）
+	native NativeControl
+
 	// 其他
 	disposed bool
 }
@@ -89,6 +92,20 @@ func (bw *BaseWidget) GetStyle() *Style {
 	return bw.style
 }
 
+// SetNativeControl 记录后端为该组件创建的原生控件句柄
+func (bw *BaseWidget) SetNativeControl(control NativeControl) {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	bw.native = control
+}
+
+// NativeControl 返回后端为该组件创建的原生控件句柄（未挂载时返回 nil）
+func (bw *BaseWidget) NativeControl() NativeControl {
+	bw.mu.RLock()
+	defer bw.mu.RUnlock()
+	return bw.native
+}
+
 // SetStyle 设置组件样式
 func (bw *BaseWidget) SetStyle(style *Style) {
 	if style == nil {
@@ -99,6 +116,11 @@ func (bw *BaseWidget) SetStyle(style *Style) {
 	defer bw.mu.Unlock()
 
 	bw.style = style
+
+	// 同步到原生控件（若已挂载）
+	if bw.native != nil {
+		bw.native.SetStyle(style)
+	}
 
 	// 更新 flex 属性
 	bw.flexItem.FlexGrow = style.FlexGrow
@@ -197,7 +219,12 @@ func (bw *BaseWidget) GetVisible() bool {
 func (bw *BaseWidget) SetVisible(visible bool) {
 	bw.mu.Lock()
 	bw.visible = visible
+	native := bw.native
 	bw.mu.Unlock()
+
+	if native != nil {
+		native.SetVisible(visible)
+	}
 }
 
 // GetEnabled 获取启用状态
@@ -211,7 +238,12 @@ func (bw *BaseWidget) GetEnabled() bool {
 func (bw *BaseWidget) SetEnabled(enabled bool) {
 	bw.mu.Lock()
 	bw.enabled = enabled
+	native := bw.native
 	bw.mu.Unlock()
+
+	if native != nil {
+		native.SetEnabled(enabled)
+	}
 }
 
 // GetFlexProperties 获取 Flex 属性
@@ -285,6 +317,12 @@ func (bw *BaseWidget) Dispose() {
 
 	// 清理事件
 	bw.events.Clear()
+
+	// 释放原生控件
+	if bw.native != nil {
+		bw.native.Destroy()
+		bw.native = nil
+	}
 
 	// 递归销毁子组件
 	bw.mu.RLock()

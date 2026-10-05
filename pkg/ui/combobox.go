@@ -58,6 +58,7 @@ func (cb *ComboBox) Items(items ...string) *ComboBox {
 		cb.selectedIndex = -1
 		cb.selectedIndexSignal.Set(-1)
 	}
+	syncWidget(cb)
 	return cb
 }
 
@@ -77,6 +78,7 @@ func (cb *ComboBox) SelectedIndex(index int) *ComboBox {
 	oldIndex := cb.selectedIndex
 	cb.selectedIndex = index
 	cb.selectedIndexSignal.Set(index)
+	syncWidget(cb)
 
 	// 触发变更事件
 	if oldIndex != index && cb.onChange != nil {
@@ -111,6 +113,7 @@ func (cb *ComboBox) GetSelectedIndexSignal() *reactive.Signal[int] {
 // Placeholder 设置占位符（链式调用）
 func (cb *ComboBox) Placeholder(placeholder string) *ComboBox {
 	cb.placeholder = placeholder
+	syncWidget(cb)
 	return cb
 }
 
@@ -292,15 +295,9 @@ func (cb *ComboBox) Layout(x, y, width, height float32) {
 	cb.flexItem.Height = height
 }
 
-// Render 渲染下拉框
+// Render 渲染下拉框：将当前状态同步到后端已创建的原生控件
 func (cb *ComboBox) Render() error {
-	if !cb.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 ComboBox
-	// 这里只是占位实现
-	return nil
+	return renderWidget(cb)
 }
 
 // HandleEvent 处理事件

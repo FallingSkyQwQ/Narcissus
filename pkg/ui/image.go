@@ -56,6 +56,7 @@ func (img *Image) Source(source string) *Image {
 	img.source = source
 	img.loaded = false
 	img.measured = false
+	syncWidget(img)
 	return img
 }
 
@@ -293,15 +294,9 @@ func (img *Image) Layout(x, y, width, height float32) {
 	img.flexItem.Height = height
 }
 
-// Render 渲染图片组件
+// Render 渲染图片组件：将当前状态同步到后端已创建的原生控件
 func (img *Image) Render() error {
-	if !img.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 Image
-	// 这里只是占位实现
-	return nil
+	return renderWidget(img)
 }
 
 // SetNaturalSize 设置图片原始尺寸（加载完成后调用）

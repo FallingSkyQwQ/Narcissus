@@ -50,7 +50,12 @@ func RunChecks() []CheckResult {
 	results = append(results, checkGit())
 	results = append(results, checkUPX())
 	results = append(results, checkAir())
-	results = append(results, checkWindowsSDK())
+	switch runtime.GOOS {
+	case "linux":
+		results = append(results, checkGTK())
+	case "windows":
+		results = append(results, checkWindowsSDK())
+	}
 	return results
 }
 
@@ -61,22 +66,58 @@ func checkOS() CheckResult {
 		return CheckResult{
 			Name:    "Operating System",
 			Status:  StatusOK,
-			Message: fmt.Sprintf("Windows (%s)", runtime.GOARCH),
+			Message: fmt.Sprintf("Windows (%s) - WinUI backend", runtime.GOARCH),
 		}
-	case "linux", "darwin":
+	case "linux":
+		return CheckResult{
+			Name:    "Operating System",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Linux (%s) - GTK4 backend", runtime.GOARCH),
+		}
+	case "darwin":
 		return CheckResult{
 			Name:    "Operating System",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("%s (%s) - Narcissus is designed for Windows", capitalize(goos), runtime.GOARCH),
-			Fix:     "Run on Windows for full compatibility",
+			Message: fmt.Sprintf("%s (%s) - no backend yet", capitalize(goos), runtime.GOARCH),
+			Fix:     "Run on Linux (GTK4) or Windows for a supported backend",
 		}
 	default:
 		return CheckResult{
 			Name:    "Operating System",
 			Status:  StatusWarning,
 			Message: fmt.Sprintf("%s (%s) - unsupported platform", goos, runtime.GOARCH),
-			Fix:     "Use Windows 10/11 for best experience",
+			Fix:     "Use Linux (GTK4) or Windows for best experience",
 		}
+	}
+}
+
+// checkGTK verifies that the GTK4 development libraries required by the Linux
+// backend are available.
+func checkGTK() CheckResult {
+	if _, err := exec.LookPath("pkg-config"); err != nil {
+		return CheckResult{
+			Name:    "GTK4",
+			Status:  StatusError,
+			Message: "pkg-config not found, cannot locate GTK4",
+			Fix:     "Install pkg-config (e.g. apt install pkg-config)",
+		}
+	}
+
+	cmd := exec.Command("pkg-config", "--modversion", "gtk4")
+	output, err := cmd.Output()
+	if err != nil {
+		return CheckResult{
+			Name:    "GTK4",
+			Status:  StatusError,
+			Message: "gtk4 development files not found",
+			Fix:     "Install GTK4 dev packages (e.g. apt install libgtk-4-dev)",
+		}
+	}
+
+	return CheckResult{
+		Name:    "GTK4",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("Version %s", strings.TrimSpace(string(output))),
 	}
 }
 

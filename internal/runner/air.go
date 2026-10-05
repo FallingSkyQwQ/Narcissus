@@ -5,16 +5,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
-const AirConfig = `# Air configuration for Narcissus development
+// AirConfig returns an air configuration for the given target GOOS. The
+// executable suffix follows the target, so hot reload works on Linux as well
+// as Windows.
+func AirConfig(goos string) string {
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	ext := ""
+	if goos == "windows" {
+		ext = ".exe"
+	}
+
+	return fmt.Sprintf(`# Air configuration for Narcissus development
 root = "."
 tmp_dir = "tmp"
 
 [build]
-cmd = "go build -o ./tmp/main.exe ."
-bin = "tmp/main.exe"
-full_bin = "./tmp/main.exe"
+cmd = "go build -o ./tmp/main%s ."
+bin = "tmp/main%s"
+full_bin = "./tmp/main%s"
 include_ext = ["go", "mod", "sum"]
 exclude_dir = ["assets", "tmp", "vendor", "dist", "build"]
 delay = 1000
@@ -31,18 +44,16 @@ runner = "green"
 
 [misc]
 clean_on_exit = true
-`
-
-func SetupAir(projectDir string) error {
-	configPath := filepath.Join(projectDir, ".air.toml")
-	if _, err := os.Stat(configPath); err == nil {
-		return nil
-	}
-	return os.WriteFile(configPath, []byte(AirConfig), 0644)
+`, ext, ext, ext)
 }
 
-func RunWithAir(projectDir string) error {
-	if err := SetupAir(projectDir); err != nil {
+func SetupAir(projectDir, goos string) error {
+	configPath := filepath.Join(projectDir, ".air.toml")
+	return os.WriteFile(configPath, []byte(AirConfig(goos)), 0644)
+}
+
+func RunWithAir(projectDir, goos string) error {
+	if err := SetupAir(projectDir, goos); err != nil {
 		return fmt.Errorf("failed to setup air config: %w", err)
 	}
 	if _, err := exec.LookPath("air"); err != nil {

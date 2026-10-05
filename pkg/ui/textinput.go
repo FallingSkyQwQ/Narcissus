@@ -224,6 +224,7 @@ func (ti *TextInput) SetText(text string) {
 	oldValue := ti.value
 	ti.value = text
 	ti.valueSignal.Set(text)
+	syncWidget(ti)
 
 	// 触发变更事件
 	if oldValue != text && ti.onChange != nil {
@@ -308,15 +309,9 @@ func (ti *TextInput) Layout(x, y, width, height float32) {
 	ti.flexItem.Height = height
 }
 
-// Render 渲染输入框
+// Render 渲染输入框：将当前状态同步到后端已创建的原生控件
 func (ti *TextInput) Render() error {
-	if !ti.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 TextBox
-	// 这里只是占位实现
-	return nil
+	return renderWidget(ti)
 }
 
 // HandleEvent 处理事件
