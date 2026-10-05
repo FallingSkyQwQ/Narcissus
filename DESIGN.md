@@ -84,6 +84,24 @@ click becomes an `EventClick` dispatched through `Widget.HandleEvent`.
 (`backend_gtk_linux.go`, `backend_windows.go`, `backend_unsupported.go`), and
 `SetBackend` lets tests inject a fake.
 
+## Focus and keyboard
+
+`pkg/ui/focus.go` owns a toolkit-neutral focus manager. Widgets opt into
+focus via `BaseWidget.SetFocusable` (Button, Checkbox, ComboBox, Slider and
+TextInput do; Text, Image and Container do not).
+
+- `RequestFocus(w)` moves focus, dispatching `EventBlur` to the previous
+  widget and `EventFocus` to the new one, then asking the backend for native
+  focus through the optional `focusRequester` interface on the control.
+- `FocusNext` / `FocusPrevious` walk the focusable widgets in document order,
+  wrapping around; `DispatchKey` turns an unhandled TAB into a traversal step.
+- Key events from the backend enter through `DispatchKey`, which routes them to
+  the focused widget and bubbles up its ancestors until one consumes them.
+
+The mount path calls `SetFocusRoot` with the window content so traversal knows
+which tree to walk. Backends report toolkit focus changes with
+`notifyNativeFocus` / `notifyNativeBlur`.
+
 ## Styling and theming
 
 `Style` (`pkg/ui/style.go`) carries layout, background, border, font, shadow

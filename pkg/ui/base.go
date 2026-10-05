@@ -41,8 +41,9 @@ type BaseWidget struct {
 	events *EventRegistry
 
 	// 状态
-	visible bool
-	enabled bool
+	visible   bool
+	enabled   bool
+	focusable bool
 
 	// 原生控件句柄（由平台后端创建，未挂载时为 nil）
 	native NativeControl
@@ -225,6 +226,20 @@ func (bw *BaseWidget) SetVisible(visible bool) {
 	if native != nil {
 		native.SetVisible(visible)
 	}
+}
+
+// SetFocusable 设置组件是否可以获取键盘焦点
+func (bw *BaseWidget) SetFocusable(focusable bool) {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	bw.focusable = focusable
+}
+
+// IsFocusable 返回组件是否参与键盘焦点与 TAB 遍历
+func (bw *BaseWidget) IsFocusable() bool {
+	bw.mu.RLock()
+	defer bw.mu.RUnlock()
+	return bw.focusable
 }
 
 // GetEnabled 获取启用状态

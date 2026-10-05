@@ -115,6 +115,8 @@ func layoutAndMount(backend Backend, surface NativeControl, content Widget, widt
 	if content == nil {
 		return nil
 	}
+	// TAB traversal walks the tree that was mounted last.
+	SetFocusRoot(content)
 	if width <= 0 {
 		width = 800
 	}

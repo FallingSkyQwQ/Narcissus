@@ -36,6 +36,7 @@ func NewComboBox() *ComboBox {
 		selectedIndex:       -1,
 		selectedIndexSignal: reactive.NewSignal(-1),
 	}
+	cb.SetFocusable(true)
 
 	// 设置默认样式
 	cb.style.BackgroundColor = ColorWhite

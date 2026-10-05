@@ -169,6 +169,17 @@ func (gw *gtkWindow) materialize() {
 	win.SetDefaultSize(int(gw.width), int(gw.height))
 	win.SetChild(overlay)
 
+	// Keyboard input is routed to the focused widget; TAB traversal and
+	// bubbling live in the framework (see focus.go).
+	key := gtk.NewEventControllerKey()
+	key.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		return dispatchGTKKey(EventKeyDown, keyval, keycode, state)
+	})
+	key.ConnectKeyReleased(func(keyval, keycode uint, state gdk.ModifierType) {
+		dispatchGTKKey(EventKeyUp, keyval, keycode, state)
+	})
+	win.AddController(key)
+
 	gw.overlay, gw.area, gw.root, gw.win = overlay, area, root, win
 	gw.built = true
 
@@ -398,6 +409,18 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 
 	c.base = gtk.BaseWidget(c.widget)
 	c.applyProps(props)
+
+	// Focusable controls join the toolkit's focus chain and report focus
+	// changes back into the framework's focus manager.
+	if bw := widgetBase(w); bw != nil && bw.IsFocusable() {
+		c.base.SetCanFocus(true)
+		c.base.SetFocusOnClick(true)
+		focus := gtk.NewEventControllerFocus()
+		focus.ConnectEnter(func() { notifyNativeFocus(w) })
+		focus.ConnectLeave(func() { notifyNativeBlur(w) })
+		c.base.AddController(focus)
+	}
+
 	return c, nil
 }
 
@@ -519,6 +542,14 @@ func (c *gtkControl) SetStyle(style *Style) {
 	c.provider.LoadFromString(cssFor(c.className, style))
 }
 
+// RequestFocus gives toolkit focus to the control. It satisfies the
+// focusRequester interface consumed by the focus manager.
+func (c *gtkControl) RequestFocus() {
+	if c.base != nil {
+		c.base.GrabFocus()
+	}
+}
+
 func (c *gtkControl) Destroy() {
 	if c.attached && c.parentFixed != nil {
 		c.parentFixed.Remove(c.widget)
@@ -594,6 +625,21 @@ func bufferText(buf *gtk.TextBuffer) string {
 		return ""
 	}
 	return buf.Text(buf.StartIter(), buf.EndIter(), true)
+}
+
+// dispatchGTKKey translates a GTK key event into a framework KeyEvent and
+// routes it through the focus manager.
+func dispatchGTKKey(kind EventType, keyval, keycode uint, state gdk.ModifierType) bool {
+	ev := NewKeyEvent(
+		kind,
+		gdk.KeyvalName(keyval),
+		int(keycode),
+		state&gdk.ControlMask != 0,
+		state&gdk.ShiftMask != 0,
+		state&gdk.AltMask != 0,
+		state&gdk.MetaMask != 0,
+	)
+	return DispatchKey(ev)
 }
 
 func newClickEvent(target Widget) *BaseEvent {

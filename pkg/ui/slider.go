@@ -38,6 +38,7 @@ func NewSlider() *Slider {
 		step:        1,
 		valueSignal: reactive.NewSignal(float32(0)),
 	}
+	s.SetFocusable(true)
 
 	// 设置默认样式
 	s.style.BackgroundColor = ColorTransparent

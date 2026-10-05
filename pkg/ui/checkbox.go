@@ -29,6 +29,7 @@ func NewCheckbox() *Checkbox {
 		checked:       false,
 		checkedSignal: reactive.NewSignal(false),
 	}
+	cb.SetFocusable(true)
 
 	// 设置默认样式
 	cb.style.TextColor = ColorBlack
