@@ -133,25 +133,10 @@ func (t *Text) Style(style *Style) *Text {
 	return t
 }
 
-// measureText 测量文本尺寸
-// 这是一个简化实现，实际应该调用系统文本测量 API
+// measureText 返回当前字体下文本的自然尺寸。它委托给已安装的
+// TextMeasurer，因此后端可以接入系统真实的字体度量。
 func (t *Text) measureText() (width, height float32) {
-	if t.text == "" {
-		return 0, t.style.Font.Size * t.style.Font.LineHeight
-	}
-
-	// 简化计算：假设每个字符平均宽度为字体大小的 0.6 倍
-	charWidth := t.style.Font.Size * 0.6
-	lineHeight := t.style.Font.Size * t.style.Font.LineHeight
-
-	// 计算字符数
-	charCount := len([]rune(t.text))
-
-	// 假设单行文本
-	width = float32(charCount) * charWidth
-	height = lineHeight
-
-	return width, height
+	return MeasureText(t.text, t.style.Font)
 }
 
 // Measure 测量文本组件大小
@@ -159,13 +144,13 @@ func (t *Text) Measure(constraints flex.Constraint) flex.Size {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// 如果已经测量过且文本未改变，直接返回缓存值
-	if t.measured && t.measuredWidth > 0 && t.measuredHeight > 0 {
-		return flex.Size{Width: t.measuredWidth, Height: t.measuredHeight}
+	// 缓存自然尺寸（未施加约束），约束在每次调用时重新应用，避免同一个
+	// 文本在不同约束下复用被裁剪过的旧尺寸。
+	if !t.measured {
+		t.measuredWidth, t.measuredHeight = t.measureText()
+		t.measured = true
 	}
-
-	// 测量文本
-	width, height := t.measureText()
+	width, height := t.measuredWidth, t.measuredHeight
 
 	// 应用约束
 	if constraints.MaxWidth > 0 && width > constraints.MaxWidth {
@@ -181,10 +166,7 @@ func (t *Text) Measure(constraints flex.Constraint) flex.Size {
 		height = constraints.MinHeight
 	}
 
-	t.measuredWidth = width
-	t.measuredHeight = height
 	t.flexItem.SetMeasuredSize(width, height)
-	t.measured = true
 
 	return flex.Size{Width: width, Height: height}
 }

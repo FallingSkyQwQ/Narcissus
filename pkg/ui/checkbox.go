@@ -140,10 +140,11 @@ func (cb *Checkbox) Measure(constraints flex.Constraint) flex.Size {
 
 	// 如果有标签，计算标签宽度
 	if cb.label != "" {
-		charWidth := cb.style.Font.Size * 0.6
-		labelWidth := float32(len([]rune(cb.label))) * charWidth
+		labelWidth, labelHeight := MeasureText(cb.label, cb.style.Font)
 		width += labelWidth
-		height = max(height, cb.style.Font.Size*cb.style.Font.LineHeight)
+		if labelHeight > height {
+			height = labelHeight
+		}
 	}
 
 	// 应用约束

@@ -242,9 +242,8 @@ func (cb *ComboBox) Measure(constraints flex.Constraint) flex.Size {
 	} else {
 		// 计算最小宽度：最长选项的宽度
 		maxTextWidth := float32(0)
-		charWidth := cb.style.Font.Size * 0.6
 		for _, item := range cb.items {
-			textWidth := float32(len([]rune(item))) * charWidth
+			textWidth, _ := MeasureText(item, cb.style.Font)
 			if textWidth > maxTextWidth {
 				maxTextWidth = textWidth
 			}

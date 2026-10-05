@@ -51,6 +51,9 @@ func (b *gtkBackend) Init() error {
 		return errors.New("gtk4: failed to create GtkApplication (is a display available?)")
 	}
 	b.app.ConnectActivate(b.onActivate)
+	// Measure text with Pango so the flex engine lays out against the same
+	// metrics GTK uses to draw labels.
+	SetTextMeasurer(newGTKTextMeasurer())
 	b.uiThreadID = currentGoroutineID()
 	b.initialized = true
 	return nil
@@ -560,6 +563,9 @@ func cssFor(className string, s *Style) string {
 	}
 	if s.Font.Style == FontStyleItalic {
 		b.WriteString("font-style: italic;")
+	}
+	if s.Font.LineHeight > 0 {
+		fmt.Fprintf(&b, "line-height: %g;", s.Font.LineHeight)
 	}
 	if s.Opacity > 0 && s.Opacity < 1 {
 		fmt.Fprintf(&b, "opacity: %g;", s.Opacity)
