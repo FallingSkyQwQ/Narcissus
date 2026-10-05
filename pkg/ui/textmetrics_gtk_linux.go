@@ -30,7 +30,18 @@ func (m *gtkTextMeasurer) scratch() *gtk.Label {
 	return m.label
 }
 
+// MeasureText returns the natural (unwrapped) size of text.
 func (m *gtkTextMeasurer) MeasureText(text string, font Font) (width, height float32) {
+	return m.measure(text, font, 0)
+}
+
+// MeasureTextWidth returns the size text occupies when wrapped to maxWidth.
+// It is picked up through the wrappedTextMeasurer interface.
+func (m *gtkTextMeasurer) MeasureTextWidth(text string, font Font, maxWidth float32) (width, height float32) {
+	return m.measure(text, font, maxWidth)
+}
+
+func (m *gtkTextMeasurer) measure(text string, font Font, maxWidth float32) (width, height float32) {
 	size := font.Size
 	if size <= 0 {
 		size = DefaultFont().Size
@@ -50,12 +61,17 @@ func (m *gtkTextMeasurer) MeasureText(text string, font Font) (width, height flo
 	if font.Family != "" {
 		desc.SetFamily(font.Family)
 	}
-	// SetAbsoluteSize is in device units (pixels), matching the px-based sizes
-	// the framework and the GTK CSS use.
-	desc.SetAbsoluteSize(float64(size))
+	// Pango absolute sizes are in PANGO_SCALE units (1/1024 of a pixel), not
+	// pixels, so the pixel size must be scaled up.
+	desc.SetAbsoluteSize(float64(size) * float64(pango.SCALE))
 	desc.SetWeight(pangoWeight(font.Weight))
 	desc.SetStyle(pangoStyle(font.Style))
 	layout.SetFontDescription(desc)
+
+	if maxWidth > 0 {
+		layout.SetWrap(pango.WrapWordChar)
+		layout.SetWidth(int(float64(maxWidth) * float64(pango.SCALE)))
+	}
 
 	w, h := layout.PixelSize()
 	lines := layout.LineCount()
@@ -63,12 +79,19 @@ func (m *gtkTextMeasurer) MeasureText(text string, font Font) (width, height flo
 		lines = 1
 	}
 
-	// Pango reports the font's natural line height. Bias it toward the style's
-	// requested multiplier so LineHeight behaves the same here as in the CSS
-	// emitted by the GTK backend.
-	height = float32(h) + float32(lines)*size*(lineHeight-1)
+	// Pango reports the font's natural height; bias it up toward the style's
+	// line-height multiplier so it never underestimates what the CSS-rendered
+	// label will occupy.
+	height = float32(h)
+	if min := float32(lines) * size * lineHeight; height < min {
+		height = min
+	}
 
-	return float32(w), height
+	width = float32(w)
+	if maxWidth > 0 && width > maxWidth {
+		width = maxWidth
+	}
+	return width, height
 }
 
 func pangoWeight(w FontWeight) pango.Weight {

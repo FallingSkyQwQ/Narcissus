@@ -158,6 +158,8 @@ func (r *RadioButton) Measure(constraints flex.Constraint) flex.Size {
 			height = labelHeight
 		}
 	}
+	// Reserve a little vertical room for the toolkit's taller radio control.
+	height += 6
 	if r.style.Width > 0 {
 		width = r.style.Width
 	}

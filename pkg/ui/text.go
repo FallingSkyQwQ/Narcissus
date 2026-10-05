@@ -152,6 +152,14 @@ func (t *Text) Measure(constraints flex.Constraint) flex.Size {
 	}
 	width, height := t.measuredWidth, t.measuredHeight
 
+	// Text wider than the available space wraps: re-measure against the
+	// maximum width so the height covers every wrapped line. Without this the
+	// native label would wrap while the framework reserved a single line,
+	// making following widgets overlap.
+	if constraints.MaxWidth > 0 && width > constraints.MaxWidth {
+		width, height = MeasureTextWrapped(t.text, t.style.Font, constraints.MaxWidth)
+	}
+
 	// 应用约束
 	if constraints.MaxWidth > 0 && width > constraints.MaxWidth {
 		width = constraints.MaxWidth

@@ -233,8 +233,8 @@ func (c *Container) Layout(x, y, width, height float32) {
 			case AlignCenter:
 				crossStart = (lc - (itemCross + crossOuterMargin(item, row))) / 2
 			case AlignStretch:
-				// Only items without a definite cross size fill the line.
-				if baseCross == 0 {
+				// Items whose cross size is indefinite (auto) fill the line.
+				if baseCross == 0 || itemCrossAuto(item, row) {
 					itemCross = lc - crossOuterMargin(item, row)
 					if itemCross < 0 {
 						itemCross = 0

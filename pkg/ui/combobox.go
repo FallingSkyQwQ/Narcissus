@@ -42,10 +42,10 @@ func NewComboBox() *ComboBox {
 	cb.style.BackgroundColor = ColorWhite
 	cb.style.TextColor = ColorBlack
 	cb.style.Font = DefaultFont()
-	cb.style.Padding = UniformInsets(8)
+	cb.style.Padding = Insets{Top: 8, Right: 12, Bottom: 8, Left: 12}
 	cb.style.Border.Width = 1
 	cb.style.Border.Color = ColorLightBorder
-	cb.style.Border.Radius = 4
+	cb.style.Border.Radius = 8
 
 	return cb
 }
@@ -253,7 +253,7 @@ func (cb *ComboBox) Measure(constraints flex.Constraint) flex.Size {
 		if maxTextWidth == 0 {
 			maxTextWidth = 100
 		}
-		width = maxTextWidth + cb.style.Padding.Left + cb.style.Padding.Right + 30 // 30 是下拉箭头空间
+		width = maxTextWidth + cb.style.Padding.Left + cb.style.Padding.Right + 36 // 36 是下拉箭头空间
 	}
 
 	// 计算高度

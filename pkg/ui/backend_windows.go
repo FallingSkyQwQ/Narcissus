@@ -822,16 +822,41 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		}
 	}
 
+	// Selecting a row while setting the initial props raises the toolkit's
+	// SelectionChanged event; guard it so the model is not called back during
+	// construction.
+	c.applying = true
 	c.applyProps(props)
+	c.applying = false
 	return c, nil
 }
 
 func (c *winControl) AttachTo(parent NativeControl) {
 	p, ok := parent.(*winControl)
-	if !ok || p == nil || p.asPanel == nil || c.asUIElement == nil {
+	if !ok || p == nil || c.asUIElement == nil {
 		return
 	}
 	if c.attached {
+		return
+	}
+
+	// A ScrollViewer is a content control, not a panel, so a ScrollView's child
+	// becomes its Content rather than a Canvas child.
+	if p.asPanel == nil && p.asContentControl != nil {
+		ui, err := c.asUIElement()
+		if err != nil || ui == nil {
+			return
+		}
+		if err := app.With(p.asContentControl, func(cc *uixaml.IContentControl) error {
+			return cc.SetContent((*syswinrt.IInspectable)(unsafe.Pointer(ui)))
+		}); err != nil {
+			return
+		}
+		c.attached = true
+		return
+	}
+
+	if p.asPanel == nil {
 		return
 	}
 	if err := app.Append(p.asPanel, c.asUIElement); err != nil {

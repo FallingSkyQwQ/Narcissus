@@ -23,6 +23,13 @@ type Item struct {
 	// Alignment override
 	AlignSelf Align
 
+	// WidthAuto and HeightAuto mark an axis whose size is not definite (the
+	// item is content-sized). Under align-items: stretch, an item with an auto
+	// cross size fills the line's cross size, matching CSS flexbox / Yoga. A
+	// definite size (explicit width or height) is never stretched.
+	WidthAuto  bool
+	HeightAuto bool
+
 	// Margins
 	MarginTop    float32
 	MarginRight  float32

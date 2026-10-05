@@ -293,6 +293,8 @@ func (c *Container) Measure(constraints flex.Constraint) flex.Size {
 		item := flex.Item{
 			Width:         childSize.Width,
 			Height:        childSize.Height,
+			WidthAuto:     childStyle.Width <= 0,
+			HeightAuto:    childStyle.Height <= 0,
 			FlexGrow:      child.GetFlexProperties().FlexGrow,
 			FlexShrink:    child.GetFlexProperties().FlexShrink,
 			FlexBasis:     child.GetFlexProperties().FlexBasis,
@@ -412,6 +414,8 @@ func (c *Container) Layout(x, y, width, height float32) {
 		item := flex.Item{
 			Width:         measuredWidth,
 			Height:        measuredHeight,
+			WidthAuto:     style.Width <= 0,
+			HeightAuto:    style.Height <= 0,
 			FlexGrow:      child.GetFlexProperties().FlexGrow,
 			FlexShrink:    child.GetFlexProperties().FlexShrink,
 			FlexBasis:     child.GetFlexProperties().FlexBasis,

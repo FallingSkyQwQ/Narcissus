@@ -188,7 +188,12 @@ func layoutAndMount(backend Backend, surface NativeControl, content Widget, widt
 	content.Measure(constraints)
 	content.Layout(0, 0, width, height)
 
-	return mountRecursive(backend, surface, content, 0, 0)
+	if err := mountRecursive(backend, surface, content, 0, 0); err != nil {
+		return err
+	}
+	// The toolkit is now initialized and the first window laid out.
+	fireReady()
+	return nil
 }
 
 // mountRecursive creates (once) and positions the native control for w inside

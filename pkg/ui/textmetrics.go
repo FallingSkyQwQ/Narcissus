@@ -1,6 +1,9 @@
 package ui
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // TextMeasurer reports the rendered size of a string for a given Font.
 //
@@ -47,6 +50,69 @@ func TextMeasurerOrDefault() TextMeasurer {
 // without every widget changing.
 func MeasureText(text string, font Font) (width, height float32) {
 	return TextMeasurerOrDefault().MeasureText(text, font)
+}
+
+// wrappedTextMeasurer is optionally implemented by a TextMeasurer that can
+// account for line wrapping at a maximum width.
+type wrappedTextMeasurer interface {
+	MeasureTextWidth(text string, font Font, maxWidth float32) (width, height float32)
+}
+
+// MeasureTextWrapped measures text as it would occupy when wrapped to maxWidth.
+// The installed measurer is used when it supports width-aware measurement;
+// otherwise a greedy word-wrap over MeasureText is used. It returns maxWidth as
+// the width when wrapping occurs, so callers allocate the full line width.
+func MeasureTextWrapped(text string, font Font, maxWidth float32) (width, height float32) {
+	if maxWidth <= 0 {
+		return MeasureText(text, font)
+	}
+	if m, ok := TextMeasurerOrDefault().(wrappedTextMeasurer); ok {
+		return m.MeasureTextWidth(text, font, maxWidth)
+	}
+	return estimateWrapped(text, font, maxWidth)
+}
+
+// estimateWrapped greedily wraps text by words for measurers without a
+// width-aware implementation.
+func estimateWrapped(text string, font Font, maxWidth float32) (width, height float32) {
+	size := font.Size
+	if size <= 0 {
+		size = DefaultFont().Size
+	}
+	lineHeight := font.LineHeight
+	if lineHeight <= 0 {
+		lineHeight = 1.2
+	}
+
+	lines := 0
+	for _, paragraph := range strings.Split(text, "\n") {
+		words := strings.Fields(paragraph)
+		if len(words) == 0 {
+			lines++
+			continue
+		}
+		current := ""
+		for _, word := range words {
+			candidate := word
+			if current != "" {
+				candidate = current + " " + word
+			}
+			candidateWidth, _ := MeasureText(candidate, font)
+			if current != "" && candidateWidth > maxWidth {
+				lines++
+				current = word
+			} else {
+				current = candidate
+			}
+		}
+		if current != "" {
+			lines++
+		}
+	}
+	if lines == 0 {
+		lines = 1
+	}
+	return maxWidth, float32(lines) * size * lineHeight
 }
 
 // estimateMeasurer approximates text size from per-rune advance widths. It does

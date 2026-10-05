@@ -134,7 +134,8 @@ func (cb *Checkbox) Measure(constraints flex.Constraint) flex.Size {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	// 复选框尺寸：方框 + 标签
+	// 复选框尺寸：方框 + 标签。GTK 的 GtkCheckButton 渲染高度大于字体本身，
+	// 这里预留少量垂直余量，避免原生控件溢出分配到的矩形而与相邻控件重叠。
 	boxSize := cb.style.Font.Size * 1.2
 	width := boxSize + 8 // 方框和标签间距
 	height := boxSize
@@ -147,6 +148,7 @@ func (cb *Checkbox) Measure(constraints flex.Constraint) flex.Size {
 			height = labelHeight
 		}
 	}
+	height += 6
 
 	// 应用约束
 	if constraints.MaxWidth > 0 && width > constraints.MaxWidth {

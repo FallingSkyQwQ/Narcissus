@@ -24,8 +24,13 @@ func newPlatformBackend() Backend {
 	return &gtkBackend{}
 }
 
-// gtkBackend can present dialogs and toasts.
-var _ Presenter = (*gtkBackend)(nil)
+// gtkBackend can present dialogs and toasts, report the system appearance and
+// apply a light/dark request to the toolkit.
+var (
+	_ Presenter           = (*gtkBackend)(nil)
+	_ SystemThemeProvider = (*gtkBackend)(nil)
+	_ ThemeApplier        = (*gtkBackend)(nil)
+)
 
 // gtkBackend implements Backend on top of GTK4.
 //
@@ -48,6 +53,48 @@ type gtkBackend struct {
 	// later controls can join the same GTK group.
 	radioMu    sync.Mutex
 	radioHeads map[string]*gtk.CheckButton
+
+	// modalCSS is the shared provider for dialog and toast chrome, installed
+	// lazily on first use.
+	modalCSS *gtk.CSSProvider
+}
+
+// modalCSSSource styles presenters (dialogs and toasts) that are created
+// outside the widget tree and therefore have no per-widget provider.
+const modalCSSSource = `
+.narc-toast { border-radius: 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
+.narc-toast > label { padding: 12px 20px; color: #ffffff; font-weight: 600; }
+.narc-toast-info { background-color: #37474F; }
+.narc-toast-success { background-color: #2E7D32; }
+.narc-toast-warning { background-color: #EF6C00; }
+.narc-toast-error { background-color: #C62828; }
+.narc-dialog-title { font-size: 17px; font-weight: 700; }
+.narc-dialog-message { opacity: 0.85; }
+`
+
+// ensureModalCSS installs the shared presenter provider once per display.
+func (b *gtkBackend) ensureModalCSS(display *gdk.Display) {
+	if b.modalCSS != nil || display == nil {
+		return
+	}
+	provider := gtk.NewCSSProvider()
+	provider.LoadFromString(modalCSSSource)
+	gtk.StyleContextAddProviderForDisplay(display, provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+	b.modalCSS = provider
+}
+
+// toastSeverityClass maps a severity to its CSS class suffix.
+func toastSeverityClass(severity ToastSeverity) string {
+	switch severity {
+	case ToastSuccess:
+		return "success"
+	case ToastWarning:
+		return "warning"
+	case ToastError:
+		return "error"
+	default:
+		return "info"
+	}
 }
 
 // registerRadio returns the existing head control for a group, or records the
@@ -69,6 +116,48 @@ func (b *gtkBackend) registerRadio(group string, btn *gtk.CheckButton) *gtk.Chec
 }
 
 func (b *gtkBackend) Name() string { return "gtk4" }
+
+// SystemPrefersDark reports the desktop's dark-mode preference. GTK4 has no
+// single API for it, so several signals are consulted: the GTK_THEME override,
+// the toolkit's prefer-dark flag, a dark theme name, and finally the GNOME
+// color-scheme setting.
+func (b *gtkBackend) SystemPrefersDark() bool {
+	// An explicit GTK_THEME override wins outright.
+	if theme, ok := os.LookupEnv("GTK_THEME"); ok && theme != "" {
+		return strings.Contains(strings.ToLower(theme), "dark")
+	}
+	if settings := gtk.SettingsGetDefault(); settings != nil {
+		if preferDark, ok := settings.ObjectProperty("gtk-application-prefer-dark-theme").(bool); ok && preferDark {
+			return true
+		}
+		if name, ok := settings.ObjectProperty("gtk-theme-name").(string); ok && strings.Contains(strings.ToLower(name), "dark") {
+			return true
+		}
+	}
+	return gnomePrefersDark()
+}
+
+// gnomePrefersDark reads org.gnome.desktop.interface:color-scheme, the setting
+// GNOME and most GTK desktops expose for the system appearance.
+func gnomePrefersDark() bool {
+	source := gio.SettingsSchemaSourceGetDefault()
+	if source == nil || source.Lookup("org.gnome.desktop.interface", true) == nil {
+		return false
+	}
+	settings := gio.NewSettings("org.gnome.desktop.interface")
+	if settings == nil {
+		return false
+	}
+	return settings.String("color-scheme") == "prefer-dark"
+}
+
+// ApplyTheme asks GTK to render native controls in a dark or light appearance,
+// so toolkit-drawn chrome matches the framework theme.
+func (b *gtkBackend) ApplyTheme(dark bool) {
+	if settings := gtk.SettingsGetDefault(); settings != nil {
+		settings.SetObjectProperty("gtk-application-prefer-dark-theme", dark)
+	}
+}
 
 func (b *gtkBackend) Init() error {
 	if b.initialized {
@@ -157,11 +246,12 @@ func (b *gtkBackend) OnUIThread() bool {
 	return currentGoroutineID() == b.uiThreadID
 }
 
-// PresentDialog shows a modal GtkMessageDialog over the most recently created
-// window. It satisfies the Presenter capability.
+// PresentDialog shows a modal dialog over the most recently created window. It
+// satisfies the Presenter capability.
 //
-// The dialog uses GtkDialog's action area so an arbitrary number of labelled
-// buttons is supported: each button reports its own index through OnResult.
+// A custom window is used rather than GtkMessageDialog so the title, message and
+// action row can be spaced and styled consistently with the rest of the
+// framework. Each button reports its own index through OnResult.
 func (b *gtkBackend) PresentDialog(spec DialogSpec) error {
 	if b.app == nil {
 		return errors.New("gtk4: backend not initialized")
@@ -171,51 +261,94 @@ func (b *gtkBackend) PresentDialog(spec DialogSpec) error {
 		buttons = []string{"OK"}
 	}
 
-	parent := b.activeWindow()
-	dialog := gtk.NewMessageDialog(parent, gtk.DialogModal, gtk.MessageInfo, gtk.ButtonsNone)
-	dialog.SetTitle(spec.Title)
-	dialog.SetMarkup(spec.Message)
-
-	onResult := spec.OnResult
-	dialog.ConnectResponse(func(responseID int) {
-		index := responseID - 1
-		dialog.Destroy()
-		if onResult != nil && index >= 0 && index < len(buttons) {
-			onResult(index)
-		}
-	})
-	for i, label := range buttons {
-		dialog.AddButton(label, i+1)
+	win := gtk.NewWindow()
+	if parent := b.activeWindow(); parent != nil {
+		win.SetTransientFor(parent)
 	}
-	dialog.SetDefaultResponse(1)
-	dialog.Present()
+	win.SetModal(true)
+	win.SetTitle(spec.Title)
+	win.SetResizable(false)
+	win.SetDefaultSize(380, 0)
+
+	content := gtk.NewBox(gtk.OrientationVertical, 0)
+	content.SetMarginTop(24)
+	content.SetMarginBottom(20)
+	content.SetMarginStart(24)
+	content.SetMarginEnd(24)
+
+	title := gtk.NewLabel(spec.Title)
+	title.SetXAlign(0)
+	title.SetWrap(true)
+	title.AddCSSClass("narc-dialog-title")
+	title.SetMarginBottom(10)
+
+	message := gtk.NewLabel(spec.Message)
+	message.SetXAlign(0)
+	message.SetWrap(true)
+	message.SetMaxWidthChars(46)
+	message.AddCSSClass("narc-dialog-message")
+	message.SetMarginBottom(22)
+
+	content.Append(title)
+	content.Append(message)
+
+	actions := gtk.NewBox(gtk.OrientationHorizontal, 10)
+	actions.SetHAlign(gtk.AlignEnd)
+	onResult := spec.OnResult
+	for i, label := range buttons {
+		index := i
+		btn := gtk.NewButtonWithLabel(label)
+		if index == len(buttons)-1 {
+			btn.AddCSSClass("suggested-action")
+		}
+		btn.ConnectClicked(func() {
+			win.Close()
+			if onResult != nil {
+				onResult(index)
+			}
+		})
+		actions.Append(btn)
+	}
+	content.Append(actions)
+	win.SetChild(content)
+
+	b.ensureModalCSS(gtk.BaseWidget(win).Display())
+	win.Present()
 	return nil
 }
 
-// PresentToast shows a transient notification at the top of the window.
+// PresentToast shows a transient notification near the top of the window. The
+// card is tinted by severity and slides in and out.
 func (b *gtkBackend) PresentToast(spec ToastSpec) error {
 	window := b.activeWindowWidget()
 	if window == nil {
 		return errors.New("gtk4: no window for toast")
 	}
 
-	revealer := gtk.NewRevealer()
-	revealer.SetTransitionType(gtk.RevealerTransitionTypeSlideDown)
-	label := gtk.NewLabel(spec.Message)
-	label.SetMarginTop(6)
-	label.SetMarginBottom(6)
-	label.SetMarginStart(12)
-	label.SetMarginEnd(12)
-	revealer.SetChild(label)
-
 	child := window.Child()
 	overlay, ok := child.(*gtk.Overlay)
 	if !ok {
 		return errors.New("gtk4: window has no overlay for toast")
 	}
-	overlay.AddOverlay(revealer)
+
+	label := gtk.NewLabel(spec.Message)
+	label.SetWrap(true)
+	label.SetMaxWidthChars(40)
+
+	box := gtk.NewBox(gtk.OrientationHorizontal, 0)
+	box.Append(label)
+	box.AddCSSClass("narc-toast")
+	box.AddCSSClass("narc-toast-" + toastSeverityClass(spec.Severity))
+
+	revealer := gtk.NewRevealer()
+	revealer.SetTransitionType(gtk.RevealerTransitionTypeSlideDown)
+	revealer.SetChild(box)
 	revealer.SetHAlign(gtk.AlignCenter)
 	revealer.SetVAlign(gtk.AlignStart)
+	revealer.SetMarginTop(16)
+
+	b.ensureModalCSS(gtk.BaseWidget(window).Display())
+	overlay.AddOverlay(revealer)
 	revealer.SetVisible(true)
 	revealer.SetRevealChild(true)
 
@@ -399,11 +532,17 @@ type gtkControl struct {
 	surface *gtk.Fixed
 	// parentFixed is the surface this control currently lives in.
 	parentFixed *gtk.Fixed
-	attached    bool
+	// scrollParent is set when this control is the scrollable content of a
+	// GtkScrolledWindow rather than a child of a GtkFixed surface.
+	scrollParent *gtk.ScrolledWindow
+	attached     bool
 
 	className string
 	provider  *gtk.CSSProvider
 	applying  bool
+	// destroyed is set once the control is torn down so late toolkit signals
+	// do not call back into a widget that is no longer mounted.
+	destroyed bool
 	// itemsKey is the joined item list last pushed to a list control.
 	itemsKey string
 
@@ -464,7 +603,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		c.button = btn
 		c.widget = btn
 		btn.ConnectClicked(func() {
-			if c.applying {
+			if c.applying || c.destroyed || !c.attached {
 				return
 			}
 			w.HandleEvent(newClickEvent(w))
@@ -481,7 +620,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		c.check = cb
 		c.widget = cb
 		cb.ConnectToggled(func() {
-			if c.applying {
+			if c.applying || c.destroyed || !c.attached {
 				return
 			}
 			if box, ok := w.(*Checkbox); ok {
@@ -496,7 +635,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		c.dropdown = dd
 		c.widget = dd
 		dd.NotifyProperty("selected", func() {
-			if c.applying {
+			if c.applying || c.destroyed || !c.attached {
 				return
 			}
 			if combo, ok := w.(*ComboBox); ok {
@@ -509,7 +648,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		c.scale = scale
 		c.widget = scale
 		scale.ConnectValueChanged(func() {
-			if c.applying {
+			if c.applying || c.destroyed || !c.attached {
 				return
 			}
 			if slider, ok := w.(*Slider); ok {
@@ -564,14 +703,16 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		sw := gtk.NewSwitch()
 		c.toggle = sw
 		c.widget = sw
-		sw.ConnectStateSet(func(state bool) bool {
-			if c.applying {
-				return false
+		// Track the "active" property rather than "state-set": GTK emits a
+		// spurious state-set while realizing the widget, which would otherwise
+		// look like the user turning the switch off.
+		sw.NotifyProperty("active", func() {
+			if c.applying || c.destroyed || !c.attached {
+				return
 			}
 			if s, ok := w.(*Switch); ok {
-				s.Checked(state)
+				s.Checked(sw.Active())
 			}
-			return false
 		})
 	case ControlRadio:
 		rb := gtk.NewCheckButtonWithLabel(props.Text)
@@ -582,7 +723,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 			rb.SetGroup(head)
 		}
 		rb.ConnectToggled(func() {
-			if c.applying {
+			if c.applying || c.destroyed || !c.attached {
 				return
 			}
 			if r, ok := w.(*RadioButton); ok && rb.Active() {
@@ -599,7 +740,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 			c.textBuf = buf
 			c.widget = tv
 			buf.ConnectChanged(func() {
-				if c.applying {
+				if c.applying || c.destroyed || !c.attached {
 					return
 				}
 				if input, ok := w.(*TextInput); ok {
@@ -613,7 +754,7 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 			c.entry = entry
 			c.widget = entry
 			entry.ConnectChanged(func() {
-				if c.applying {
+				if c.applying || c.destroyed || !c.attached {
 					return
 				}
 				if input, ok := w.(*TextInput); ok {
@@ -626,7 +767,12 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 	}
 
 	c.base = gtk.BaseWidget(c.widget)
+	// Applying the initial props can make a toolkit control emit a change
+	// signal (for example selecting a list row). Guard it so the widget model
+	// is not called back while it is still being constructed.
+	c.applying = true
 	c.applyProps(props)
+	c.applying = false
 
 	// Focusable controls join the toolkit's focus chain and report focus
 	// changes back into the framework's focus manager.
@@ -828,19 +974,47 @@ func listSelectionMode(mode int) gtk.SelectionMode {
 
 func (c *gtkControl) AttachTo(parent NativeControl) {
 	p, ok := parent.(*gtkControl)
-	if !ok || p == nil || p.surface == nil || c.widget == nil {
+	if !ok || p == nil || c.widget == nil {
 		return
 	}
-	if c.attached && c.parentFixed == p.surface {
+
+	// A scrolled window hosts a single child as its scrollable content, so a
+	// ScrollView's child attaches as that content rather than as a fixed-layout
+	// child.
+	if p.scroll != nil {
+		if c.scrollParent == p.scroll {
+			return
+		}
+		c.detach()
+		p.scroll.SetChild(c.widget)
+		c.scrollParent = p.scroll
+		c.attached = true
 		return
 	}
-	if c.attached && c.parentFixed != nil {
-		c.parentFixed.Remove(c.widget)
-		c.attached = false
+
+	if p.surface == nil {
+		return
 	}
+	if c.attached && c.parentFixed == p.surface && c.scrollParent == nil {
+		return
+	}
+	c.detach()
 	p.surface.Put(c.widget, 0, 0)
 	c.parentFixed = p.surface
 	c.attached = true
+}
+
+// detach removes the control from whatever currently parents it.
+func (c *gtkControl) detach() {
+	if c.parentFixed != nil {
+		c.parentFixed.Remove(c.widget)
+		c.parentFixed = nil
+	}
+	if c.scrollParent != nil {
+		c.scrollParent.SetChild(nil)
+		c.scrollParent = nil
+	}
+	c.attached = false
 }
 
 func (c *gtkControl) SetBounds(x, y, width, height float32) {
@@ -909,11 +1083,8 @@ func (c *gtkControl) RequestFocus() {
 }
 
 func (c *gtkControl) Destroy() {
-	if c.attached && c.parentFixed != nil {
-		c.parentFixed.Remove(c.widget)
-	}
-	c.attached = false
-	c.parentFixed = nil
+	c.destroyed = true
+	c.detach()
 }
 
 // hasBoxStyle reports whether a container has any visual style worth emitting.
@@ -926,7 +1097,9 @@ func cssFor(className string, s *Style) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, ".%s {", className)
 	if s.BackgroundColor.A > 0 {
-		fmt.Fprintf(&b, "background-color: %s;", s.BackgroundColor.Hex())
+		// GTK's default theme paints control backgrounds with a
+		// background-image (a gradient); clear it so our background-color wins.
+		fmt.Fprintf(&b, "background-color: %s; background-image: none;", s.BackgroundColor.Hex())
 	}
 	if s.TextColor.A > 0 {
 		fmt.Fprintf(&b, "color: %s;", s.TextColor.Hex())
@@ -953,8 +1126,12 @@ func cssFor(className string, s *Style) string {
 	if s.Font.Style == FontStyleItalic {
 		b.WriteString("font-style: italic;")
 	}
-	if s.Font.LineHeight > 0 {
-		fmt.Fprintf(&b, "line-height: %g;", s.Font.LineHeight)
+	if s.Font.LineHeight > 0 && s.Font.Size > 0 {
+		// Emit an absolute line height rather than a multiplier: GTK treats a
+		// bare number as a multiple of the font's *natural* line box, which
+		// would not match the framework's measurement (font size x line
+		// height). An explicit px value keeps the two in step.
+		fmt.Fprintf(&b, "line-height: %gpx;", s.Font.Size*s.Font.LineHeight)
 	}
 	if s.Opacity > 0 && s.Opacity < 1 {
 		fmt.Fprintf(&b, "opacity: %g;", s.Opacity)
