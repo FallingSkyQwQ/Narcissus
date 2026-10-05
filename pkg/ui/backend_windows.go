@@ -270,6 +270,9 @@ type winControl struct {
 	asRangeBase        func() (*uixaml.IRangeBase, error)
 	asTextBox          func() (*uixaml.ITextBox, error)
 	asImage            func() (*uixaml.IImage, error)
+	asProgressBar      func() (*uixaml.IProgressBar, error)
+	asToggleSwitch     func() (*uixaml.IToggleSwitch, error)
+	asRadioButton      func() (*uixaml.IRadioButton, error)
 
 	attached  bool
 	applying  bool
@@ -371,6 +374,36 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		c.asFrameworkElement = box.AsFrameworkElement
 		c.asControl = box.AsControl
 		c.asTextBox = box.AsTextBox
+	case ControlProgress:
+		pb, err := uixaml.NewProgressBar()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ProgressBar: %w", err)
+		}
+		c.asUIElement = pb.AsUIElement
+		c.asFrameworkElement = pb.AsFrameworkElement
+		c.asControl = pb.AsControl
+		c.asRangeBase = pb.AsRangeBase
+		c.asProgressBar = pb.AsProgressBar
+	case ControlSwitch:
+		sw, err := uixaml.NewToggleSwitch()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create ToggleSwitch: %w", err)
+		}
+		c.asUIElement = sw.AsUIElement
+		c.asFrameworkElement = sw.AsFrameworkElement
+		c.asControl = sw.AsControl
+		c.asToggleSwitch = sw.AsToggleSwitch
+	case ControlRadio:
+		rb, err := uixaml.NewRadioButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: create RadioButton: %w", err)
+		}
+		c.asUIElement = rb.AsUIElement
+		c.asFrameworkElement = rb.AsFrameworkElement
+		c.asControl = rb.AsControl
+		c.asContentControl = rb.AsContentControl
+		c.asToggleButton = rb.AsToggleButton
+		c.asRadioButton = rb.AsRadioButton
 	default:
 		return nil, fmt.Errorf("winui3: unsupported control kind %s", kind)
 	} // Event wiring. Each handler calls back into the widget model; the applying
@@ -495,6 +528,49 @@ func newWinControl(w Widget, kind ControlKind, props ControlProps) (*winControl,
 		textBox.Release()
 		if err != nil {
 			return nil, fmt.Errorf("winui3: wire TextBox.TextChanged: %w", err)
+		}
+	case ControlSwitch:
+		toggle, err := c.asToggleSwitch()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query IToggleSwitch: %w", err)
+		}
+		_, err = app.On(toggle.AddToggled, uixaml.NewRoutedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+				if c.applying {
+					return
+				}
+				switchWidget, ok := w.(*Switch)
+				if !ok {
+					return
+				}
+				on, readErr := withValue(c.asToggleSwitch, func(t *uixaml.IToggleSwitch) (bool, error) {
+					return t.IsOn()
+				})
+				if readErr == nil {
+					switchWidget.Checked(on)
+				}
+			})
+		toggle.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire ToggleSwitch.Toggled: %w", err)
+		}
+	case ControlRadio:
+		toggle, err := c.asToggleButton()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: query IToggleButton: %w", err)
+		}
+		_, err = app.On(toggle.AddChecked, uixaml.NewRoutedEventHandler,
+			func(_ *syswinrt.IInspectable, _ *uixaml.IRoutedEventArgs) {
+				if c.applying {
+					return
+				}
+				if radio, ok := w.(*RadioButton); ok {
+					radio.Checked(true)
+				}
+			})
+		toggle.Release()
+		if err != nil {
+			return nil, fmt.Errorf("winui3: wire RadioButton.Checked: %w", err)
 		}
 	}
 
@@ -694,6 +770,45 @@ func (c *winControl) applyProps(props ControlProps) {
 		}
 	case ControlImage:
 		c.setImageSource(props.Source)
+	case ControlProgress:
+		if c.asRangeBase != nil {
+			_ = app.With(c.asRangeBase, func(rb *uixaml.IRangeBase) error {
+				return app.All(
+					rb.SetMinimum(props.Min),
+					rb.SetMaximum(props.Max),
+					rb.SetValue(props.Value),
+				)
+			})
+		}
+		if c.asProgressBar != nil {
+			_ = app.With(c.asProgressBar, func(pb *uixaml.IProgressBar) error {
+				return pb.SetIsIndeterminate(props.Indeterminate)
+			})
+		}
+	case ControlSwitch:
+		if c.asToggleSwitch != nil {
+			_ = app.With(c.asToggleSwitch, func(t *uixaml.IToggleSwitch) error {
+				return t.SetIsOn(props.Checked)
+			})
+		}
+	case ControlRadio:
+		if c.asContentControl != nil {
+			_ = app.SetContent(c.asContentControl, props.Text)
+		}
+		if c.asToggleButton != nil {
+			checked, err := app.BoxAs[uixaml.IReferenceOfBool](props.Checked, &uixaml.IID_IReferenceOfBool)
+			if err == nil {
+				_ = app.With(c.asToggleButton, func(toggle *uixaml.IToggleButton) error {
+					return toggle.SetIsChecked(checked)
+				})
+				checked.Release()
+			}
+		}
+		if c.asRadioButton != nil && props.Group != "" {
+			_ = app.With(c.asRadioButton, func(rb *uixaml.IRadioButton) error {
+				return rb.SetGroupName(props.Group)
+			})
+		}
 	}
 }
 

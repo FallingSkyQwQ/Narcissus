@@ -369,6 +369,17 @@ func (bw *BaseWidget) GetFlexItem() *flex.Item {
 	return &bw.flexItem
 }
 
+// clampAxis 将数值限制在非零的 min/max 约束内。
+func clampAxis(value, minValue, maxValue float32) float32 {
+	if minValue > 0 && value < minValue {
+		value = minValue
+	}
+	if maxValue > 0 && value > maxValue {
+		value = maxValue
+	}
+	return value
+}
+
 // SetFlexItem 设置 FlexItem
 func (bw *BaseWidget) SetFlexItem(item flex.Item) {
 	bw.mu.Lock()

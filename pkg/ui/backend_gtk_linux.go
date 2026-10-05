@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
@@ -38,6 +39,29 @@ type gtkBackend struct {
 	initialized bool
 	activated   bool
 	windows     []*gtkWindow
+
+	// radioHeads maps a radio group to the first control created for it, so
+	// later controls can join the same GTK group.
+	radioMu    sync.Mutex
+	radioHeads map[string]*gtk.CheckButton
+}
+
+// registerRadio returns the existing head control for a group, or records the
+// given control as the head when the group is new.
+func (b *gtkBackend) registerRadio(group string, btn *gtk.CheckButton) *gtk.CheckButton {
+	if group == "" {
+		return nil
+	}
+	b.radioMu.Lock()
+	defer b.radioMu.Unlock()
+	if b.radioHeads == nil {
+		b.radioHeads = map[string]*gtk.CheckButton{}
+	}
+	if head := b.radioHeads[group]; head != nil {
+		return head
+	}
+	b.radioHeads[group] = btn
+	return nil
 }
 
 func (b *gtkBackend) Name() string { return "gtk4" }
@@ -278,6 +302,9 @@ type gtkControl struct {
 	entry    *gtk.Entry
 	textView *gtk.TextView
 	textBuf  *gtk.TextBuffer
+	progress *gtk.ProgressBar
+	toggle   *gtk.Switch
+	radio    *gtk.CheckButton
 }
 
 // newGTKSurface wraps a fresh GtkFixed as the root surface of a window.
@@ -371,6 +398,39 @@ func newGTKControl(b *gtkBackend, w Widget, kind ControlKind, props ControlProps
 		}
 		c.picture = pic
 		c.widget = pic
+	case ControlProgress:
+		pb := gtk.NewProgressBar()
+		c.progress = pb
+		c.widget = pb
+	case ControlSwitch:
+		sw := gtk.NewSwitch()
+		c.toggle = sw
+		c.widget = sw
+		sw.ConnectStateSet(func(state bool) bool {
+			if c.applying {
+				return false
+			}
+			if s, ok := w.(*Switch); ok {
+				s.Checked(state)
+			}
+			return false
+		})
+	case ControlRadio:
+		rb := gtk.NewCheckButtonWithLabel(props.Text)
+		rb.SetActive(props.Checked)
+		c.radio = rb
+		c.widget = rb
+		if head := b.registerRadio(props.Group, rb); head != nil {
+			rb.SetGroup(head)
+		}
+		rb.ConnectToggled(func() {
+			if c.applying {
+				return
+			}
+			if r, ok := w.(*RadioButton); ok && rb.Active() {
+				r.Checked(true)
+			}
+		})
 	case ControlTextInput:
 		if props.Multiline {
 			tv := gtk.NewTextView()
@@ -464,6 +524,33 @@ func (c *gtkControl) applyProps(props ControlProps) {
 		}
 		if c.textBuf != nil && bufferText(c.textBuf) != props.Text {
 			c.textBuf.SetText(props.Text)
+		}
+	case ControlProgress:
+		if c.progress != nil {
+			c.progress.SetShowText(props.ShowText)
+			if props.Indeterminate {
+				c.progress.Pulse()
+			} else {
+				fraction := 0.0
+				if props.Max > props.Min {
+					fraction = (props.Value - props.Min) / (props.Max - props.Min)
+				}
+				if fraction < 0 {
+					fraction = 0
+				} else if fraction > 1 {
+					fraction = 1
+				}
+				c.progress.SetFraction(fraction)
+			}
+		}
+	case ControlSwitch:
+		if c.toggle != nil {
+			c.toggle.SetActive(props.Checked)
+		}
+	case ControlRadio:
+		if c.radio != nil {
+			c.radio.SetActive(props.Checked)
+			c.radio.SetLabel(props.Text)
 		}
 	}
 }

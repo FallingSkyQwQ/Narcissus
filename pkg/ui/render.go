@@ -23,6 +23,12 @@ func kindOf(w Widget) ControlKind {
 		return ControlImage
 	case *TextInput:
 		return ControlTextInput
+	case *ProgressBar:
+		return ControlProgress
+	case *Switch:
+		return ControlSwitch
+	case *RadioButton:
+		return ControlRadio
 	default:
 		return ControlContainer
 	}
@@ -59,6 +65,18 @@ func propsOf(w Widget) ControlProps {
 			Multiline:   v.GetInputType() == TextInputTypeMultiline,
 			ReadOnly:    v.IsReadOnly(),
 		}
+	case *ProgressBar:
+		return ControlProps{
+			Value:         float64(v.GetValue()),
+			Min:           float64(v.GetMin()),
+			Max:           float64(v.GetMax()),
+			Indeterminate: v.IsIndeterminate(),
+			ShowText:      v.IsShowingText(),
+		}
+	case *Switch:
+		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel()}
+	case *RadioButton:
+		return ControlProps{Checked: v.IsChecked(), Text: v.GetLabel(), Group: v.GetGroup()}
 	default:
 		return ControlProps{}
 	}
@@ -82,6 +100,12 @@ func widgetBase(w Widget) *BaseWidget {
 	case *Image:
 		return v.BaseWidget
 	case *TextInput:
+		return v.BaseWidget
+	case *ProgressBar:
+		return v.BaseWidget
+	case *Switch:
+		return v.BaseWidget
+	case *RadioButton:
 		return v.BaseWidget
 	default:
 		return nil
