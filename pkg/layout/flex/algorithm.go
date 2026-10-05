@@ -7,8 +7,137 @@ type Line struct {
 	CrossSize float32
 }
 
-// calculateLines splits items into lines based on wrap mode
+// isRow reports whether direction lays items out horizontally.
+func isRow(direction Direction) bool {
+	return direction == DirectionRow || direction == DirectionRowReverse
+}
+
+// isReverse reports whether direction lays items out from the far end.
+func isReverse(direction Direction) bool {
+	return direction == DirectionRowReverse || direction == DirectionColumnReverse
+}
+
+// mainGap returns the physical gap between items along the main axis.
+func mainGap(container *Container, row bool) float32 {
+	if row {
+		return container.ColumnGap
+	}
+	return container.RowGap
+}
+
+// crossGap returns the physical gap between lines along the cross axis.
+func crossGap(container *Container, row bool) float32 {
+	if row {
+		return container.RowGap
+	}
+	return container.ColumnGap
+}
+
+// mainExtent returns the definite main-axis bound of a constraint, or 0 when
+// the main axis is unbounded.
+func mainExtent(row bool, c Constraint) float32 {
+	if row {
+		return c.MaxWidth
+	}
+	return c.MaxHeight
+}
+
+// itemBaseMain resolves an item's main-axis base size: flex-basis wins over the
+// measured size, matching the CSS flex-basis:auto fallback order.
+func itemBaseMain(item *Item, row bool) float32 {
+	if item.FlexBasis > 0 {
+		return item.FlexBasis
+	}
+	if row {
+		w, _ := item.GetMeasuredSize()
+		if w == 0 {
+			w = item.Width
+		}
+		return w
+	}
+	_, h := item.GetMeasuredSize()
+	if h == 0 {
+		h = item.Height
+	}
+	return h
+}
+
+// itemBaseCross resolves an item's cross-axis base size.
+func itemBaseCross(item *Item, row bool) float32 {
+	if row {
+		_, h := item.GetMeasuredSize()
+		if h == 0 {
+			h = item.Height
+		}
+		return h
+	}
+	w, _ := item.GetMeasuredSize()
+	if w == 0 {
+		w = item.Width
+	}
+	return w
+}
+
+// mainOuterMargin returns the sum of the main-axis margins of an item.
+func mainOuterMargin(item *Item, row bool) float32 {
+	if row {
+		return item.MarginLeft + item.MarginRight
+	}
+	return item.MarginTop + item.MarginBottom
+}
+
+// crossOuterMargin returns the sum of the cross-axis margins of an item.
+func crossOuterMargin(item *Item, row bool) float32 {
+	if row {
+		return item.MarginTop + item.MarginBottom
+	}
+	return item.MarginLeft + item.MarginRight
+}
+
+// leadingMainMargin returns the main-axis margin before an item along the axis.
+func leadingMainMargin(item *Item, row bool) float32 {
+	if row {
+		return item.MarginLeft
+	}
+	return item.MarginTop
+}
+
+// trailingMainMargin returns the main-axis margin after an item along the axis.
+func trailingMainMargin(item *Item, row bool) float32 {
+	if row {
+		return item.MarginRight
+	}
+	return item.MarginBottom
+}
+
+// leadingCrossMargin returns the cross-axis margin before an item.
+func leadingCrossMargin(item *Item, row bool) float32 {
+	if row {
+		return item.MarginTop
+	}
+	return item.MarginLeft
+}
+
+func itemMainMin(item *Item, row bool) float32 {
+	if row {
+		return item.MinWidth
+	}
+	return item.MinHeight
+}
+
+func itemMainMax(item *Item, row bool) float32 {
+	if row {
+		return item.MaxWidth
+	}
+	return item.MaxHeight
+}
+
+// calculateLines splits items into lines based on wrap mode, accounting for
+// main-axis margins and gaps so a line does not overflow the available space.
 func calculateLines(container *Container, availableMain float32) []Line {
+	row := isRow(container.Direction)
+	gap := mainGap(container, row)
+
 	if container.Wrap == WrapNoWrap {
 		line := Line{Items: make([]*Item, len(container.Items))}
 		for i := range container.Items {
@@ -19,27 +148,26 @@ func calculateLines(container *Container, availableMain float32) []Line {
 
 	var lines []Line
 	currentLine := Line{Items: make([]*Item, 0)}
-	currentMainSize := float32(0)
+	var currentMain float32
 
 	for i := range container.Items {
 		item := &container.Items[i]
-		w, h := item.GetMeasuredSize()
+		itemMain := itemBaseMain(item, row) + mainOuterMargin(item, row)
 
-		var itemMainSize float32
-		if container.Direction == DirectionRow || container.Direction == DirectionRowReverse {
-			itemMainSize = w
-		} else {
-			itemMainSize = h
+		add := itemMain
+		if len(currentLine.Items) > 0 {
+			add += gap
 		}
 
-		if container.Wrap != WrapNoWrap && currentMainSize+itemMainSize > availableMain && len(currentLine.Items) > 0 {
+		if len(currentLine.Items) > 0 && availableMain > 0 && currentMain+add > availableMain {
 			lines = append(lines, currentLine)
 			currentLine = Line{Items: make([]*Item, 0)}
-			currentMainSize = 0
+			currentMain = 0
+			add = itemMain
 		}
 
 		currentLine.Items = append(currentLine.Items, item)
-		currentMainSize += itemMainSize
+		currentMain += add
 	}
 
 	if len(currentLine.Items) > 0 {
@@ -49,143 +177,122 @@ func calculateLines(container *Container, availableMain float32) []Line {
 	return lines
 }
 
-// distributeExtraSpace handles flex-grow and flex-shrink
-func distributeExtraSpace(line *Line, availableSpace float32, isMainAxis bool, direction Direction) {
-	if !isMainAxis {
+// resolveFlexibleLengths distributes free main-axis space among the items of a
+// line via flex-grow (positive space) or flex-shrink (negative space), clamping
+// each item to its min/max main size and re-running while any item is frozen.
+// The resolved sizes are written back to the items' main axis.
+func resolveFlexibleLengths(line *Line, free float32, row bool) {
+	n := len(line.Items)
+	if n == 0 {
 		return
 	}
 
-	// Handle flex-shrink when available space is negative (overflow)
-	if availableSpace < 0 {
-		// Track which items are frozen (clamped to 0)
-		frozen := make([]bool, len(line.Items))
-		remainingAvailableSpace := availableSpace
+	sizes := make([]float32, n)
+	for i, item := range line.Items {
+		sizes[i] = itemBaseMain(item, row)
+	}
 
-		// Iterative redistribution: repeat until space satisfied or all items frozen
-		for remainingAvailableSpace < 0 {
-			// Compute totalFlexShrink only over unfrozen items
-			totalFlexShrink := float32(0)
-			unfrozenCount := 0
+	if free > 0 {
+		frozen := make([]bool, n)
+		remaining := free
+		for remaining > 0.0001 {
+			var totalGrow float32
 			for i, item := range line.Items {
-				if !frozen[i] {
-					totalFlexShrink += item.FlexShrink
-					unfrozenCount++
+				if !frozen[i] && item.FlexGrow > 0 {
+					totalGrow += item.FlexGrow
 				}
 			}
-
-			// If no unfrozen items or no shrink capacity, stop
-			if unfrozenCount == 0 || totalFlexShrink == 0 {
+			if totalGrow <= 0 {
 				break
 			}
-
-			shrinkPerUnit := remainingAvailableSpace / totalFlexShrink
-			anyItemClamped := false
-
+			perGrow := remaining / totalGrow
+			consumed := float32(0)
+			for i, item := range line.Items {
+				if frozen[i] || item.FlexGrow <= 0 {
+					continue
+				}
+				delta := perGrow * item.FlexGrow
+				if maxSize := itemMainMax(item, row); maxSize > 0 && sizes[i]+delta >= maxSize {
+					consumed += maxSize - sizes[i]
+					sizes[i] = maxSize
+					frozen[i] = true
+					continue
+				}
+				sizes[i] += delta
+				consumed += delta
+			}
+			remaining -= consumed
+			if consumed <= 0 {
+				break
+			}
+		}
+	} else if free < 0 {
+		frozen := make([]bool, n)
+		remaining := -free
+		for remaining > 0.0001 {
+			var totalScaled float32
+			for i, item := range line.Items {
+				if !frozen[i] {
+					totalScaled += item.FlexShrink * sizes[i]
+				}
+			}
+			if totalScaled <= 0 {
+				break
+			}
+			consumed := float32(0)
 			for i, item := range line.Items {
 				if frozen[i] {
 					continue
 				}
-
-				shrink := shrinkPerUnit * item.FlexShrink
-				if direction == DirectionRow || direction == DirectionRowReverse {
-					measuredBase, _ := item.GetMeasuredSize()
-					if item.Width == 0 {
-						item.Width = measuredBase
-					}
-					newWidth := item.Width + shrink
-					if newWidth < 0 {
-						// Clamp to 0 and mark as frozen
-						item.Width = 0
-						frozen[i] = true
-						anyItemClamped = true
-					} else {
-						item.Width = newWidth
-					}
-				} else {
-					_, measuredBase := item.GetMeasuredSize()
-					if item.Height == 0 {
-						item.Height = measuredBase
-					}
-					newHeight := item.Height + shrink
-					if newHeight < 0 {
-						// Clamp to 0 and mark as frozen
-						item.Height = 0
-						frozen[i] = true
-						anyItemClamped = true
-					} else {
-						item.Height = newHeight
-					}
+				scaled := item.FlexShrink * sizes[i]
+				if scaled <= 0 {
+					continue
 				}
+				delta := remaining * scaled / totalScaled
+				floor := itemMainMin(item, row)
+				if floor < 0 {
+					floor = 0
+				}
+				if sizes[i]-delta <= floor {
+					consumed += sizes[i] - floor
+					sizes[i] = floor
+					frozen[i] = true
+					continue
+				}
+				sizes[i] -= delta
+				consumed += delta
 			}
-
-			// Recompute remaining available space
-			totalItemsSize := float32(0)
-			for _, item := range line.Items {
-				if direction == DirectionRow || direction == DirectionRowReverse {
-					totalItemsSize += item.Width
-				} else {
-					totalItemsSize += item.Height
-				}
-			}
-
-			// Compute new remaining space relative to original availableSpace target
-			// availableSpace is negative, so we need to check if we've distributed enough shrink
-			if direction == DirectionRow || direction == DirectionRowReverse {
-				var totalMeasured float32
-				for _, item := range line.Items {
-					w, _ := item.GetMeasuredSize()
-					totalMeasured += w
-				}
-				remainingAvailableSpace = availableSpace - (totalItemsSize - totalMeasured)
-			} else {
-				var totalMeasured float32
-				for _, item := range line.Items {
-					_, h := item.GetMeasuredSize()
-					totalMeasured += h
-				}
-				remainingAvailableSpace = availableSpace - (totalItemsSize - totalMeasured)
-			}
-
-			// If no items were clamped this iteration and we still have negative space,
-			// we've distributed as much as possible
-			if !anyItemClamped {
+			remaining -= consumed
+			if consumed <= 0 {
 				break
 			}
 		}
-		return
 	}
 
-	// Handle flex-grow when available space is positive
-	if availableSpace > 0 {
-		totalFlexGrow := float32(0)
-		for _, item := range line.Items {
-			totalFlexGrow += item.FlexGrow
-		}
-
-		if totalFlexGrow > 0 {
-			spacePerGrow := availableSpace / totalFlexGrow
-			for _, item := range line.Items {
-				extra := spacePerGrow * item.FlexGrow
-				if direction == DirectionRow || direction == DirectionRowReverse {
-					measuredBase, _ := item.GetMeasuredSize()
-					if item.Width == 0 {
-						item.Width = measuredBase
-					}
-					item.Width = item.Width + extra
-				} else {
-					_, measuredBase := item.GetMeasuredSize()
-					if item.Height == 0 {
-						item.Height = measuredBase
-					}
-					item.Height = item.Height + extra
-				}
-			}
+	for i, item := range line.Items {
+		if row {
+			item.Width = sizes[i]
+		} else {
+			item.Height = sizes[i]
 		}
 	}
 }
 
+// distributeExtraSpace handles flex-grow and flex-shrink for a line. It is kept
+// as the public-ish entry point used by tests; it delegates to the bounds-aware
+// resolver.
+func distributeExtraSpace(line *Line, availableSpace float32, isMainAxis bool, direction Direction) {
+	if !isMainAxis {
+		return
+	}
+	resolveFlexibleLengths(line, availableSpace, isRow(direction))
+}
+
 // calculateJustifyOffset calculates the starting offset based on justify content
 func calculateJustifyOffset(justify Justify, availableSpace float32, itemCount int) float32 {
+	if availableSpace < 0 {
+		availableSpace = 0
+	}
 	switch justify {
 	case JustifyFlexStart:
 		return 0
@@ -214,7 +321,7 @@ func calculateJustifyOffset(justify Justify, availableSpace float32, itemCount i
 
 // calculateJustifyGap calculates the gap between items based on justify content
 func calculateJustifyGap(justify Justify, availableSpace float32, itemCount int) float32 {
-	if itemCount <= 1 {
+	if itemCount <= 1 || availableSpace < 0 {
 		return 0
 	}
 

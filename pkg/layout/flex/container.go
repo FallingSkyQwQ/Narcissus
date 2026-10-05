@@ -33,209 +33,244 @@ func (c *Container) AddItem(item Item) {
 	c.Items = append(c.Items, item)
 }
 
-// Measure performs the measure pass
-func (c *Container) Measure(constraints Constraint) Size {
-	// Simplified implementation - full algorithm in Task 3.3
-	var totalWidth, totalHeight float32
+// clampAxis applies non-zero min/max bounds to a value.
+func clampAxis(value, minValue, maxValue float32) float32 {
+	if minValue > 0 && value < minValue {
+		value = minValue
+	}
+	if maxValue > 0 && value > maxValue {
+		value = maxValue
+	}
+	return value
+}
 
+// reverseItems returns the items in reverse order without mutating the line.
+func reverseItems(items []*Item) []*Item {
+	out := make([]*Item, len(items))
+	for i, item := range items {
+		out[len(items)-1-i] = item
+	}
+	return out
+}
+
+// Measure performs the intrinsic size pass. It refreshes each item's measured
+// size from its node (when one is attached), breaks the items into lines and
+// returns the container's natural size, clamped to the constraints.
+func (c *Container) Measure(constraints Constraint) Size {
 	for i := range c.Items {
 		item := &c.Items[i]
 		if item.Node != nil {
 			size := item.Node.Measure(constraints)
 			item.SetMeasuredSize(size.Width, size.Height)
-			totalWidth += size.Width
-			totalHeight = max(totalHeight, size.Height)
 		}
 	}
 
-	// Apply constraints
-	if constraints.MaxWidth > 0 && totalWidth > constraints.MaxWidth {
-		totalWidth = constraints.MaxWidth
-	}
-	if constraints.MaxHeight > 0 && totalHeight > constraints.MaxHeight {
-		totalHeight = constraints.MaxHeight
+	row := isRow(c.Direction)
+	lines := calculateLines(c, mainExtent(row, constraints))
+
+	var maxMain, totalCross float32
+	for li := range lines {
+		line := &lines[li]
+
+		var lineMain float32
+		for i, item := range line.Items {
+			if i > 0 {
+				lineMain += mainGap(c, row)
+			}
+			lineMain += itemBaseMain(item, row) + mainOuterMargin(item, row)
+		}
+		line.MainSize = lineMain
+		if lineMain > maxMain {
+			maxMain = lineMain
+		}
+
+		var lineCross float32
+		for _, item := range line.Items {
+			if v := itemBaseCross(item, row) + crossOuterMargin(item, row); v > lineCross {
+				lineCross = v
+			}
+		}
+		line.CrossSize = lineCross
 	}
 
-	return Size{Width: totalWidth, Height: totalHeight}
+	for i := range lines {
+		if i > 0 {
+			totalCross += crossGap(c, row)
+		}
+		totalCross += lines[i].CrossSize
+	}
+
+	var width, height float32
+	if row {
+		width, height = maxMain, totalCross
+	} else {
+		width, height = totalCross, maxMain
+	}
+
+	width = clampAxis(width, constraints.MinWidth, constraints.MaxWidth)
+	height = clampAxis(height, constraints.MinHeight, constraints.MaxHeight)
+
+	return Size{Width: width, Height: height}
 }
 
-// Layout performs the complete flexbox layout pass
+// Layout performs the complete flexbox layout pass. It resolves flexible
+// lengths, distributes leftover space through justify-content and
+// align-content, applies per-item cross-axis alignment (including stretch of
+// items without a definite cross size) and writes the final rectangles back to
+// the items.
 func (c *Container) Layout(x, y, width, height float32) {
-	// Determine main and cross axis dimensions
-	var mainSize, crossSize float32
-	var isRow bool
+	row := isRow(c.Direction)
 
-	if c.Direction == DirectionRow || c.Direction == DirectionRowReverse {
-		mainSize = width
-		crossSize = height
-		isRow = true
+	var mainSize, crossSize float32
+	if row {
+		mainSize, crossSize = width, height
 	} else {
-		mainSize = height
-		crossSize = width
-		isRow = false
+		mainSize, crossSize = height, width
 	}
 
-	// Calculate lines
 	lines := calculateLines(c, mainSize)
 
-	// Calculate cross positions for each line
-	totalCrossSize := float32(0)
-	for i := range lines {
-		line := &lines[i]
-		for _, item := range line.Items {
-			var itemCrossSize float32
-			if isRow {
-				_, itemCrossSize = item.GetMeasuredSize()
-			} else {
-				itemCrossSize, _ = item.GetMeasuredSize()
-			}
-			if itemCrossSize > line.CrossSize {
-				line.CrossSize = itemCrossSize
+	// Each line's cross size is driven by its tallest/widest outer item.
+	lineCross := make([]float32, len(lines))
+	for li := range lines {
+		var lc float32
+		for _, item := range lines[li].Items {
+			if v := itemBaseCross(item, row) + crossOuterMargin(item, row); v > lc {
+				lc = v
 			}
 		}
-		totalCrossSize += line.CrossSize
+		lineCross[li] = lc
 	}
 
-	// Calculate remaining cross space
-	remainingCrossSpace := crossSize - totalCrossSize
-
-	// Position lines along cross axis
-	var crossPos float32
-	if c.AlignContent == AlignCenter {
-		crossPos = remainingCrossSpace / 2
-	} else if c.AlignContent == AlignFlexEnd {
-		crossPos = remainingCrossSpace
+	var totalCross float32
+	for i := range lineCross {
+		if i > 0 {
+			totalCross += crossGap(c, row)
+		}
+		totalCross += lineCross[i]
+	}
+	freeCross := crossSize - totalCross
+	if freeCross < 0 {
+		freeCross = 0
 	}
 
-	// Layout each line
-	for _, line := range lines {
-		// Calculate total main size of items in this line
-		var totalItemsMainSize float32
-		for _, item := range line.Items {
-			var itemMainSize float32
-			if isRow {
-				itemMainSize, _ = item.GetMeasuredSize()
-			} else {
-				_, itemMainSize = item.GetMeasuredSize()
-			}
-			totalItemsMainSize += itemMainSize
-		}
-
-		// Distribute extra space using flex-grow
-		availableMainSpace := mainSize - totalItemsMainSize
-		distributeExtraSpace(&line, availableMainSpace, true, c.Direction)
-
-		// Calculate justify offset and gap
-		justifyOffset := calculateJustifyOffset(c.Justify, availableMainSpace, len(line.Items))
-		justifyGap := calculateJustifyGap(c.Justify, availableMainSpace, len(line.Items))
-
-		// Check if main axis is reversed
-		isMainReverse := c.Direction == DirectionRowReverse || c.Direction == DirectionColumnReverse
-
-		// Compute total main occupied space using post-distribution sizes and gaps
-		var totalMainOccupied float32
-		for idx, item := range line.Items {
-			var itemFinalMainSize float32
-			if isRow {
-				// Use post-distribution width
-				if item.Width != 0 {
-					itemFinalMainSize = item.Width
-				} else {
-					w, _ := item.GetMeasuredSize()
-					itemFinalMainSize = w
-				}
-			} else {
-				// Use post-distribution height
-				if item.Height != 0 {
-					itemFinalMainSize = item.Height
-				} else {
-					_, h := item.GetMeasuredSize()
-					itemFinalMainSize = h
-				}
-			}
-			totalMainOccupied += itemFinalMainSize
-			// Add gap between items (not after the last item)
-			if idx < len(line.Items)-1 {
-				if isRow {
-					totalMainOccupied += c.ColumnGap
-				} else {
-					totalMainOccupied += c.RowGap
-				}
+	// align-content: how leftover cross space is distributed across lines.
+	var crossOffset, extraLineGap float32
+	switch c.AlignContent {
+	case AlignFlexEnd:
+		crossOffset = freeCross
+	case AlignCenter:
+		crossOffset = freeCross / 2
+	case AlignStretch:
+		if n := len(lines); n > 0 {
+			each := freeCross / float32(n)
+			for i := range lineCross {
+				lineCross[i] += each
 			}
 		}
+	case AlignSpaceBetween:
+		if n := len(lines); n > 1 {
+			extraLineGap = freeCross / float32(n-1)
+		}
+	case AlignSpaceAround:
+		if n := len(lines); n > 0 {
+			extraLineGap = freeCross / float32(n)
+			crossOffset = extraLineGap / 2
+		}
+	case AlignSpaceEvenly:
+		if n := len(lines); n > 0 {
+			extraLineGap = freeCross / float32(n+1)
+			crossOffset = extraLineGap
+		}
+	}
 
-		// Position items along main axis
-		var mainPos float32
-		var itemsToIterate []*Item
-		if isMainReverse {
-			// For reverse direction, start from the end and iterate in reverse
-			mainPos = mainSize - justifyOffset - totalMainOccupied - (float32(len(line.Items)-1) * justifyGap)
-			// Reverse iteration order
-			itemsToIterate = make([]*Item, len(line.Items))
-			for i, item := range line.Items {
-				itemsToIterate[len(line.Items)-1-i] = item
+	crossPos := crossOffset
+	for li := range lines {
+		line := &lines[li]
+		lc := lineCross[li]
+
+		// Resolve flex-grow / flex-shrink over the line's free main space.
+		usedMain := float32(0)
+		for i, item := range line.Items {
+			if i > 0 {
+				usedMain += mainGap(c, row)
 			}
-		} else {
-			mainPos = justifyOffset
-			itemsToIterate = line.Items
+			usedMain += itemBaseMain(item, row) + mainOuterMargin(item, row)
+		}
+		resolveFlexibleLengths(line, mainSize-usedMain, row)
+
+		// Usage after resolution drives the justify-content leftover space.
+		usedMain = 0
+		for i, item := range line.Items {
+			if i > 0 {
+				usedMain += mainGap(c, row)
+			}
+			usedMain += resolvedMain(item, row) + mainOuterMargin(item, row)
+		}
+		remaining := mainSize - usedMain
+		justifyOffset := calculateJustifyOffset(c.Justify, remaining, len(line.Items))
+		justifyGap := calculateJustifyGap(c.Justify, remaining, len(line.Items))
+
+		items := line.Items
+		if isReverse(c.Direction) {
+			items = reverseItems(items)
 		}
 
-		for _, item := range itemsToIterate {
-			mw, mh := item.GetMeasuredSize()
+		cursor := justifyOffset
+		for _, item := range items {
+			itemMain := resolvedMain(item, row)
 
-			// Use measured size as base, apply flex-grow adjustments
-			var w, h float32
-			if isRow {
-				w = item.Width // This may have been adjusted by distributeExtraSpace
-				h = mh
-				if w == 0 {
-					w = mw
-				}
-			} else {
-				w = mw
-				h = item.Height // This may have been adjusted by distributeExtraSpace
-				if h == 0 {
-					h = mh
-				}
-			}
-
-			// Calculate cross-axis position. For rows the cross axis is the
-			// height, for columns it is the width.
 			align := c.Align
 			if item.AlignSelf != AlignAuto {
 				align = item.AlignSelf
 			}
-			crossItemSize := h
-			if !isRow {
-				crossItemSize = w
+			baseCross := itemBaseCross(item, row)
+			itemCross := baseCross
+			crossStart := float32(0)
+			switch align {
+			case AlignFlexEnd:
+				crossStart = lc - (itemCross + crossOuterMargin(item, row))
+			case AlignCenter:
+				crossStart = (lc - (itemCross + crossOuterMargin(item, row))) / 2
+			case AlignStretch:
+				// Only items without a definite cross size fill the line.
+				if baseCross == 0 {
+					itemCross = lc - crossOuterMargin(item, row)
+					if itemCross < 0 {
+						itemCross = 0
+					}
+				}
 			}
-			itemCrossOffset := calculateAlignment(align, crossItemSize, line.CrossSize)
+			crossStart += crossPos + leadingCrossMargin(item, row)
 
-			// Set final position and size
-			if isRow {
-				item.Left = x + mainPos
-				item.Top = y + crossPos + itemCrossOffset
-				item.Width = w
-				item.Height = h
-			} else {
-				item.Left = x + crossPos + itemCrossOffset
-				item.Top = y + mainPos
-				item.Width = w
-				item.Height = h
+			mainFromStart := cursor + leadingMainMargin(item, row)
+			if isReverse(c.Direction) {
+				mainFromStart = mainSize - mainFromStart - itemMain
 			}
 
-			// Advance main position
-			if isRow {
-				mainPos += w + justifyGap + c.ColumnGap
+			var dx, dy float32
+			if row {
+				dx, dy = mainFromStart, crossStart
+				item.Height = itemCross
 			} else {
-				mainPos += h + justifyGap + c.RowGap
+				dx, dy = crossStart, mainFromStart
+				item.Width = itemCross
 			}
+			item.Left = x + dx
+			item.Top = y + dy
+
+			cursor += leadingMainMargin(item, row) + itemMain + trailingMainMargin(item, row) +
+				justifyGap + mainGap(c, row)
 		}
 
-		if isRow {
-			crossPos += line.CrossSize + c.RowGap
-		} else {
-			crossPos += line.CrossSize + c.ColumnGap
-		}
+		crossPos += lc + crossGap(c, row) + extraLineGap
 	}
+}
+
+// resolvedMain reads an item's final main size after resolveFlexibleLengths.
+func resolvedMain(item *Item, row bool) float32 {
+	if row {
+		return item.Width
+	}
+	return item.Height
 }

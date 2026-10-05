@@ -13,6 +13,13 @@ type Item struct {
 	FlexShrink float32
 	FlexBasis  float32
 
+	// Size constraints applied while the flex algorithm distributes space.
+	// A zero value means unbounded.
+	MinWidth  float32
+	MaxWidth  float32
+	MinHeight float32
+	MaxHeight float32
+
 	// Alignment override
 	AlignSelf Align
 
