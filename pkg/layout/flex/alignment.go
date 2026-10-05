@@ -22,4 +22,10 @@ const (
 	AlignCenter
 	AlignStretch
 	AlignBaseline
+
+	// The space-* values are only meaningful for align-content; they
+	// distribute leftover cross-axis space between lines.
+	AlignSpaceBetween
+	AlignSpaceAround
+	AlignSpaceEvenly
 )

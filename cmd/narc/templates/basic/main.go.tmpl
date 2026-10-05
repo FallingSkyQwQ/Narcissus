@@ -11,12 +11,6 @@ import (
 func main() {
 	count := reactive.NewSignal(0)
 
-	window := ui.NewContainer().
-		Direction(flex.Column).
-		Justify(flex.Center).
-		AlignItems(flex.Center).
-		Padding(ui.UniformInsets(20))
-
 	title := ui.NewText("Welcome to {{.AppName}}!").
 		FontSize(24).
 		TextColor(ui.ColorPrimary)
@@ -41,18 +35,21 @@ func main() {
 		})
 
 	buttonRow := ui.NewContainer().
-		Direction(flex.Row).
+		Direction(flex.DirectionRow).
 		Gap(10).
-		Margin(ui.Insets{Top: 20})
+		Margin(ui.Insets{Top: 20}).
+		Add(incrementBtn, decrementBtn)
 
-	buttonRow.AddChild(incrementBtn)
-	buttonRow.AddChild(decrementBtn)
+	root := ui.NewContainer().
+		Direction(flex.DirectionColumn).
+		Justify(flex.JustifyCenter).
+		Align(flex.AlignCenter).
+		Padding(ui.UniformInsets(20)).
+		Add(title, counterText, buttonRow)
 
-	window.AddChild(title)
-	window.AddChild(counterText)
-	window.AddChild(buttonRow)
-
-	app := ui.NewApp("{{.AppName}}")
-	app.SetContent(window)
-	app.Run()
+	app := ui.NewApp("{{.AppName}}", ui.WithSize(480, 320))
+	app.SetContent(root)
+	if err := app.Run(); err != nil {
+		panic(err)
+	}
 }

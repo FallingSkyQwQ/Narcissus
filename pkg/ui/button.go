@@ -34,6 +34,7 @@ func NewButton() *Button {
 // Text 设置按钮文本（链式调用）
 func (b *Button) Text(text string) *Button {
 	b.text = text
+	syncWidget(b)
 	return b
 }
 
@@ -51,6 +52,7 @@ func (b *Button) OnClick(handler func()) *Button {
 // BackgroundColor 设置背景色（链式调用）
 func (b *Button) BackgroundColor(color Color) *Button {
 	b.style.BackgroundColor = color
+	syncWidget(b)
 	return b
 }
 
@@ -63,6 +65,7 @@ func (b *Button) BackgroundColorToken(token ColorToken) *Button {
 // TextColor 设置文本颜色（链式调用）
 func (b *Button) TextColor(color Color) *Button {
 	b.style.TextColor = color
+	syncWidget(b)
 	return b
 }
 
@@ -75,6 +78,7 @@ func (b *Button) TextColorToken(token ColorToken) *Button {
 // FontSize 设置字体大小（链式调用）
 func (b *Button) FontSize(size float32) *Button {
 	b.style.Font.Size = size
+	syncWidget(b)
 	return b
 }
 
@@ -143,22 +147,12 @@ func (b *Button) Style(style *Style) *Button {
 	return b
 }
 
-// measureText 测量文本尺寸
+// measureText 返回按钮文本加上内边距后的自然尺寸，使用已安装的
+// TextMeasurer 获取真实字体度量。
 func (b *Button) measureText() (width, height float32) {
-	if b.text == "" {
-		return b.style.Padding.Left + b.style.Padding.Right,
-			b.style.Font.Size*b.style.Font.LineHeight + b.style.Padding.Top + b.style.Padding.Bottom
-	}
-
-	// 简化计算：假设每个字符平均宽度为字体大小的 0.6 倍
-	charWidth := b.style.Font.Size * 0.6
-	textWidth := float32(len([]rune(b.text))) * charWidth
-	textHeight := b.style.Font.Size * b.style.Font.LineHeight
-
-	width = textWidth + b.style.Padding.Left + b.style.Padding.Right
-	height = textHeight + b.style.Padding.Top + b.style.Padding.Bottom
-
-	return width, height
+	textWidth, textHeight := MeasureText(b.text, b.style.Font)
+	return textWidth + b.style.Padding.Left + b.style.Padding.Right,
+		textHeight + b.style.Padding.Top + b.style.Padding.Bottom
 }
 
 // Measure 测量按钮大小
@@ -213,15 +207,9 @@ func (b *Button) Layout(x, y, width, height float32) {
 	b.flexItem.Height = height
 }
 
-// Render 渲染按钮
+// Render 渲染按钮：将当前状态同步到后端已创建的原生控件
 func (b *Button) Render() error {
-	if !b.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 Button
-	// 这里只是占位实现
-	return nil
+	return renderWidget(b)
 }
 
 // HandleEvent 处理事件

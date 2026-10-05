@@ -5,22 +5,21 @@ name: Go
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "feature/linux" ]
   pull_request:
     branches: [ "main" ]
-
-env:
-  GOOS: windows
-  GOARCH: amd64
 
 jobs:
 
   build:
-    # Narcissus targets Windows only (WinUI / WinRT bridge), so CI must run on Windows.
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh
+    # Narcissus ships a GTK4 backend for Linux and a WinUI 3 backend for
+    # Windows, so CI runs natively on both.
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu-latest", "windows-latest" ]
     steps:
     - uses: actions/checkout@v4
 
@@ -29,11 +28,22 @@ jobs:
       with:
         go-version: '1.27.1'
 
+    - name: Install GTK4 development files
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libgtk-4-dev
+
     - name: Build
       run: go build -v ./...
 
     - name: Test
       run: go test -v ./...
 
-    - name: Build narc CLI
+    - name: Build narc CLI (Linux)
+      if: runner.os == 'Linux'
+      run: go build -v -o narc ./cmd/narc
+
+    - name: Build narc CLI (Windows)
+      if: runner.os == 'Windows'
       run: go build -v -o narc.exe ./cmd/narc

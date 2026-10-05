@@ -58,6 +58,7 @@ func (s *Slider) Min(min float32) *Slider {
 	} else if s.value > s.max {
 		s.Value(s.max)
 	}
+	syncWidget(s)
 	return s
 }
 
@@ -79,6 +80,7 @@ func (s *Slider) Max(max float32) *Slider {
 	} else if s.value < s.min {
 		s.Value(s.min)
 	}
+	syncWidget(s)
 	return s
 }
 
@@ -97,6 +99,7 @@ func (s *Slider) Range(min, max float32) *Slider {
 	} else if s.value > max {
 		s.Value(max)
 	}
+	syncWidget(s)
 	return s
 }
 
@@ -130,6 +133,7 @@ func (s *Slider) Value(value float32) *Slider {
 		s.onChange(value)
 	}
 
+	syncWidget(s)
 	return s
 }
 
@@ -274,15 +278,9 @@ func (s *Slider) Layout(x, y, width, height float32) {
 	s.flexItem.Height = height
 }
 
-// Render 渲染滑块
+// Render 渲染滑块：将当前状态同步到后端已创建的原生控件
 func (s *Slider) Render() error {
-	if !s.GetVisible() {
-		return nil
-	}
-
-	// 实际渲染应该调用底层 WinUI API 创建 Slider
-	// 这里只是占位实现
-	return nil
+	return renderWidget(s)
 }
 
 // HandleEvent 处理事件

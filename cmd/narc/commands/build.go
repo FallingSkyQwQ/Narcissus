@@ -21,6 +21,9 @@ By default, it uses UPX compression to reduce file size.
 
 Example:
   narc build
+  narc build --target linux
+  narc build --target windows
+  narc build --target windows --no-windows-app-sdk
   narc build --output ./dist
   narc build --name myapp --no-compress
   narc build --ldflags "-s -w -X main.version=1.0.0"`,
@@ -45,6 +48,15 @@ Example:
 			buildOpts.Compress = false
 		}
 
+		noWindowsAppSDK, _ := cmd.Flags().GetBool("no-windows-app-sdk")
+		if noWindowsAppSDK {
+			buildOpts.WindowsAppSDK = false
+		}
+
+		if _, _, err := build.ResolveTarget(buildOpts); err != nil {
+			return err
+		}
+
 		if err := build.Build(buildOpts); err != nil {
 			return err
 		}
@@ -58,6 +70,10 @@ func init() {
 	buildCmd.Flags().StringVar(&buildOpts.AppName, "name", "", "Application name (default: from go.mod)")
 	buildCmd.Flags().BoolVar(&buildOpts.Compress, "compress", true, "Use UPX compression")
 	buildCmd.Flags().StringVar(&buildOpts.LDFlags, "ldflags", "", "Additional linker flags")
+	buildCmd.Flags().StringVar(&buildOpts.Target, "target", "", "Target OS: windows, linux or darwin (default: host OS)")
+	buildCmd.Flags().StringVar(&buildOpts.Arch, "arch", "", "Target architecture, e.g. amd64 or arm64 (default: host arch)")
+	buildCmd.Flags().BoolVar(&buildOpts.WindowsAppSDK, "windows-app-sdk", true, "Fetch Windows App SDK runtime files (bootstrapper DLL, resources.pri) for Windows targets")
 	buildCmd.Flags().Bool("no-compress", false, "Disable UPX compression")
+	buildCmd.Flags().Bool("no-windows-app-sdk", false, "Skip fetching the Windows App SDK runtime files")
 	rootCmd.AddCommand(buildCmd)
 }
